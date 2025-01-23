@@ -2,7 +2,7 @@
 
 AWV_MOS::AWV_MOS()
 {
-    // AWV_MOS config Params       
+    // AWV_MOS config Params
     // - Topic namespace
     nh.param<std::string>("awv_mos/m_cfg_s_output_pc_namespace", m_cfg_s_output_pc_namespace, "/awv_mos/mos_pc");
     // - LiDAR characteristic params
@@ -52,11 +52,11 @@ AWV_MOS::AWV_MOS()
     nh.param<float>("awv_mos/m_cfg_f_region_growing_ground_filter_height_m", m_cfg_f_region_growing_ground_filter_height_m, -1);
     // - Scan maching weight param
     nh.param<float>("awv_mos/m_cfg_f_static_weight_ratio", m_cfg_f_static_weight_ratio, -1);
-    // - ROS msg publish params 
+    // - ROS msg publish params
     nh.param<bool>("awv_mos/m_cfg_b_publish_pc", m_cfg_b_publish_pc, false);
     // - CPU Params
     nh.param<int>("awv_mos/m_cfg_n_num_cpu_cores", m_cfg_n_num_cpu_cores, -1);
-    if(m_cfg_n_num_cpu_cores <= 0)
+    if (m_cfg_n_num_cpu_cores <= 0)
         m_cfg_n_num_cpu_cores = std::thread::hardware_concurrency();
 
     // - Prediction write
@@ -71,144 +71,188 @@ AWV_MOS::AWV_MOS()
     nh.param<float>("awv_mos/m_cfg_f_mapping_voxel_leaf_size_m", m_cfg_f_mapping_voxel_leaf_size_m, -1);
     nh.param<bool>("awv_mos/m_cfg_b_mapping_use_visualization", m_cfg_b_mapping_use_visualization, false);
 
-    if (!nh.getParam("m_config_file_path", m_config_file_path)){ROS_WARN("Fail to get param - m_config_file_path");}
-    if (!nh.getParam("m_log_write_folder_path", m_log_write_folder_path)){ROS_WARN("Fail to get param - m_log_write_folder_path");}
+    if (!nh.getParam("m_config_file_path", m_config_file_path))
+    {
+        ROS_WARN("Fail to get param - m_config_file_path");
+    }
+    if (!nh.getParam("m_log_write_folder_path", m_log_write_folder_path))
+    {
+        ROS_WARN("Fail to get param - m_log_write_folder_path");
+    }
     if (!m_log_write_folder_path.empty() && m_log_write_folder_path.back() != '/')
         m_log_write_folder_path += '/';
 
     float vertical_fov = m_cfg_f_lidar_vertical_fov_upper_bound_deg - m_cfg_f_lidar_vertical_fov_lower_bound_deg;
-	m_num_range_image_cols = (int)(360. / m_cfg_f_lidar_horizontal_resolution_deg) + 1;
-	m_num_range_image_rows = (int)(vertical_fov / m_cfg_f_lidar_vertical_resolution_deg) + 1;
-	m_num_range_image_pixels = m_num_range_image_cols * m_num_range_image_rows;
+    m_num_range_image_cols = (int)(360. / m_cfg_f_lidar_horizontal_resolution_deg) + 1;
+    m_num_range_image_rows = (int)(vertical_fov / m_cfg_f_lidar_vertical_resolution_deg) + 1;
+    m_num_range_image_pixels = m_num_range_image_cols * m_num_range_image_rows;
 
     m_kdtree_scan_moving = boost::make_shared<pcl::KdTreeFLANN<PointTypeMOS>>();
-	m_kdtree_scan_unknown = boost::make_shared<pcl::KdTreeFLANN<PointTypeMOS>>();
-	m_voxel_grid_filter_region_growing.setLeafSize(m_cfg_f_region_growing_voxel_leaf_size_m, 
-													m_cfg_f_region_growing_voxel_leaf_size_m, 
-													m_cfg_f_region_growing_voxel_leaf_size_m);
+    m_kdtree_scan_unknown = boost::make_shared<pcl::KdTreeFLANN<PointTypeMOS>>();
+    m_voxel_grid_filter_region_growing.setLeafSize(m_cfg_f_region_growing_voxel_leaf_size_m,
+                                                   m_cfg_f_region_growing_voxel_leaf_size_m,
+                                                   m_cfg_f_region_growing_voxel_leaf_size_m);
     m_deq_frames_container = std::make_shared<std::deque<ScanFrame>>();
 }
 
-AWV_MOS::~AWV_MOS(){}
+AWV_MOS::~AWV_MOS() {}
 
-
-void AWV_MOS::RunOnlineMOS(const pcl::PointCloud<PointTypeMOS>::Ptr& i_scan, 
-                        const Eigen::Affine3f& i_tf_frame_to_map, 
-                        const int& i_frame_id,
-                        const double& i_time_s,
-                        const bool& i_is_keyframe,
-                        const bool& i_is_prior)
+// RunOnlineMOS函数实现了在线移动物体分割(MOS)的主要流程
+// 参数说明:
+// i_scan - 输入的点云数据
+// i_tf_frame_to_map - 点云帧到地图的变换矩阵
+// i_frame_id - 帧ID
+// i_time_s - 时间戳(秒)
+// i_is_keyframe - 是否为关键帧
+// i_is_prior - 是否使用先验信息
+void AWV_MOS::RunOnlineMOS(const pcl::PointCloud<PointTypeMOS>::Ptr &i_scan,
+                           const Eigen::Affine3f &i_tf_frame_to_map,
+                           const int &i_frame_id,
+                           const double &i_time_s,
+                           const bool &i_is_keyframe,
+                           const bool &i_is_prior)
 {
+    // 使用TBB并行库限制最大并行线程数
     static tbb::global_control global_limit(tbb::global_control::max_allowed_parallelism, m_cfg_n_num_cpu_cores);
 
+    // 对输入点云进行移动物体分割,结果存储在m_query_frame中
     m_query_frame = SegmentMovingObject(i_scan, i_tf_frame_to_map, i_frame_id, i_time_s, i_is_keyframe, i_is_prior);
 
-    if(m_cfg_b_use_object_scale_test)
+    // 如果启用了物体尺度测试,则对分割结果进行尺度测试
+    if (m_cfg_b_use_object_scale_test)
         ObjectScaleTest(m_query_frame);
 
-    if(m_cfg_b_use_region_growing)
+    // 如果启用了区域生长,则对分割结果进行区域生长
+    if (m_cfg_b_use_region_growing)
         RegionGrowing(m_query_frame);
 
+    // 管理帧缓存,将当前帧加入缓存
     ManageBuffer(m_query_frame, i_is_keyframe);
 
     return;
 }
 
-void AWV_MOS::RunStaticMapping(const std::vector<pcl::PointCloud<PointTypeMOS>::Ptr>& i_scans, const std::vector<Eigen::Affine3f>& i_poses, const std::vector<int>& i_frames_id, const std::vector<double>& i_times, pcl::PointCloud<PointTypeMOS>::Ptr& o_static_map, pcl::PointCloud<PointTypeMOS>::Ptr& o_dynamic_map)
+// RunStaticMapping函数实现了静态地图构建的主要流程
+// 参数说明:
+// i_scans - 输入的点云序列
+// i_poses - 点云帧的位姿序列
+// i_frames_id - 帧ID序列
+// i_times - 时间戳序列
+// o_static_map - 输出的静态地图
+// o_dynamic_map - 输出的动态地图
+void AWV_MOS::RunStaticMapping(const std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> &i_scans, const std::vector<Eigen::Affine3f> &i_poses, const std::vector<int> &i_frames_id, const std::vector<double> &i_times, pcl::PointCloud<PointTypeMOS>::Ptr &o_static_map, pcl::PointCloud<PointTypeMOS>::Ptr &o_dynamic_map)
 {
+    // 使用TBB并行库限制最大并行线程数
     static tbb::global_control global_limit(tbb::global_control::max_allowed_parallelism, m_cfg_n_num_cpu_cores);
 
-    if(i_scans.size() != i_times.size() || i_poses.size() != i_times.size() || i_frames_id.size() != i_times.size())
+    // 检查输入数据的大小是否匹配
+    if (i_scans.size() != i_times.size() || i_poses.size() != i_times.size() || i_frames_id.size() != i_times.size())
         std::cout << "scans, poses, times size are not mached. scans size: " << i_scans.size() << ", poses size: " << i_poses.size() << ", times size: " << i_times.size() << ", frames id size: " << i_frames_id.size() << "\n";
 
     std::deque<ScanFrame> ref_frames;
     std::chrono::duration<double, std::milli> duration;
     std::chrono::high_resolution_clock clock;
-	int count;
+    int count;
 
-    // Regist frames
+    // 第一步:注册帧
     double sum_regist_time_ms = 0;
     double regist_time_ms = 0;
     count = 0;
     bool is_keyframe = true;
+    // 初始化第一帧
     ScanFrame first_scan_frame = InitScanFrame(i_scans[0], i_poses[0], i_frames_id[0], i_times[0], is_keyframe);
     m_deq_frames_container->push_back(first_scan_frame);
     m_vec_keyframe_frame_id_list.push_back(i_frames_id[0]);
     m_vec_keyframe_frame_index_list.push_back(0);
-    for(int idx = 1; idx < i_poses.size(); idx++)
+
+    // 注册其余帧
+    for (int idx = 1; idx < i_poses.size(); idx++)
     {
         count++;
         auto regist_start_time = clock.now();
 
+        // 关键帧选择
         int prev_keyframe_idx = m_vec_keyframe_frame_index_list.back();
         Eigen::Affine3f prev_pose = (*m_deq_frames_container)[prev_keyframe_idx].m_tf_frame_to_map;
         double prev_time = (*m_deq_frames_container)[prev_keyframe_idx].m_time_s;
         is_keyframe = KeyframeSelection(prev_pose, prev_time, i_poses[idx], i_times[idx]);
 
+        // 初始化并存储当前帧
         ScanFrame scan_frame = InitScanFrame(i_scans[idx], i_poses[idx], i_frames_id[idx], i_times[idx], is_keyframe);
         m_deq_frames_container->push_back(scan_frame);
 
-        if(is_keyframe == true)
+        // 如果是关键帧则记录
+        if (is_keyframe == true)
         {
             m_vec_keyframe_frame_id_list.push_back(i_frames_id[idx]);
             m_vec_keyframe_frame_index_list.push_back(idx);
         }
 
+        // 计算并显示处理时间和进度
         duration = std::chrono::high_resolution_clock::now() - regist_start_time;
         regist_time_ms = duration.count();
         sum_regist_time_ms += regist_time_ms;
 
         float progress = static_cast<float>(idx + 1) / i_poses.size() * 100.0f;
         std::cout << "\rRegist frames Progress: " << std::setw(6) << std::fixed << std::setprecision(1)
-                << progress << "% (" << (idx + 1) << "/" << i_poses.size() << ") ave time : " << sum_regist_time_ms / count << " ms" << std::flush;
+                  << progress << "% (" << (idx + 1) << "/" << i_poses.size() << ") ave time : " << sum_regist_time_ms / count << " ms" << std::flush;
     }
     std::cout << "\n";
 
-    // Run MOS   
+    // 第二步:执行MOS(移动物体分割)
     double sum_mos_time_ms = 0;
     double mos_time_ms = 0;
     count = 0;
-    for(int idx = 0; idx < m_deq_frames_container->size() && ros::ok(); idx++)
+    for (int idx = 0; idx < m_deq_frames_container->size() && ros::ok(); idx++)
     {
-        if(m_cfg_b_mapping_use_only_keyframes == true && (*m_deq_frames_container)[idx].m_keyframe_id == -1)
+        // 如果只使用关键帧且当前帧不是关键帧则跳过
+        if (m_cfg_b_mapping_use_only_keyframes == true && (*m_deq_frames_container)[idx].m_keyframe_id == -1)
             continue;
 
         count++;
         auto mos_start_time = clock.now();
 
+        // 选择参考帧并执行MOS
         ScanFrame qry_frame = (*m_deq_frames_container)[idx];
         SelectReferenceFrames(qry_frame, ref_frames);
-
         SegmentMovingObject(qry_frame, ref_frames);
 
-        if(m_cfg_b_use_object_scale_test)
+        // 执行后处理
+        if (m_cfg_b_use_object_scale_test)
             ObjectScaleTest(qry_frame);
-
-        if(m_cfg_b_use_region_growing)
+        if (m_cfg_b_use_region_growing)
             RegionGrowing(qry_frame);
 
+        // 计算并显示处理时间和进度
         duration = std::chrono::high_resolution_clock::now() - mos_start_time;
         mos_time_ms = duration.count();
         sum_mos_time_ms += mos_time_ms;
 
         float progress = static_cast<float>(idx + 1) / i_poses.size() * 100.0f;
         std::cout << "\rMOS Progress: " << std::setw(6) << std::fixed << std::setprecision(1)
-                << progress << "% (" << (idx + 1) << "/" << i_poses.size() << ") ave time : " << sum_mos_time_ms / count << " ms" << std::flush;
+                  << progress << "% (" << (idx + 1) << "/" << i_poses.size() << ") ave time : " << sum_mos_time_ms / count << " ms" << std::flush;
     }
     std::cout << "\n";
 
-    if(m_cfg_b_mapping_use_save_map == true)
+    // 第三步:如果需要保存地图
+    if (m_cfg_b_mapping_use_save_map == true)
     {
         double sum_align_time_ms = 0;
         double align_time_ms = 0;
         count = 0;
+
+        // 设置体素滤波器
         pcl::VoxelGrid<PointTypeMOS> voxel_filter;
         voxel_filter.setLeafSize(m_cfg_f_mapping_voxel_leaf_size_m, m_cfg_f_mapping_voxel_leaf_size_m, m_cfg_f_mapping_voxel_leaf_size_m);
+
+        // 创建总地图点云
         pcl::PointCloud<PointTypeMOS>::Ptr total_map(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
         total_map->points.reserve(1e9);
-        for(int idx = 1; idx < i_poses.size() && ros::ok(); idx++)
+
+        // 处理每一帧
+        for (int idx = 1; idx < i_poses.size() && ros::ok(); idx++)
         {
-            if(m_cfg_b_mapping_use_only_keyframes == true && (*m_deq_frames_container)[idx].m_keyframe_id == -1)
+            if (m_cfg_b_mapping_use_only_keyframes == true && (*m_deq_frames_container)[idx].m_keyframe_id == -1)
                 continue;
 
             count++;
@@ -216,62 +260,71 @@ void AWV_MOS::RunStaticMapping(const std::vector<pcl::PointCloud<PointTypeMOS>::
 
             ScanFrame qry_frame = (*m_deq_frames_container)[idx];
 
+            // 对点云进行降采样
             pcl::PointCloud<PointTypeMOS>::Ptr qry_scan_ds(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-            if(isEvaluationPointType == true)
+            if (isEvaluationPointType == true)
             {
+                // 评估模式下的降采样
                 pcl::PointCloud<PointTypeMOSEval>::Ptr qry_scan_ds_eval(boost::make_shared<pcl::PointCloud<PointTypeMOSEval>>());
                 pcl::copyPointCloud(*qry_frame.m_scan, *qry_scan_ds_eval);
-                VoxelDownSamplingPreservingLabels(qry_scan_ds_eval, m_cfg_f_mapping_voxel_leaf_size_m, *qry_scan_ds_eval);                
+                VoxelDownSamplingPreservingLabels(qry_scan_ds_eval, m_cfg_f_mapping_voxel_leaf_size_m, *qry_scan_ds_eval);
                 pcl::copyPointCloud(*qry_scan_ds_eval, *qry_scan_ds);
             }
             else
             {
+                // 普通模式下的降采样
                 voxel_filter.setInputCloud(qry_frame.m_scan);
                 voxel_filter.filter(*qry_scan_ds);
             }
 
+            // 对点云进行对齐
             pcl::PointCloud<PointTypeMOS>::Ptr qry_scan_aligned(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-            for (const auto& point : qry_scan_ds->points) 
+            for (const auto &point : qry_scan_ds->points)
             {
-                float range = sqrt(point.x*point.x + point.y*point.y + point.z*point.z);
-                if(range < m_cfg_f_range_image_min_dist_m)
+                float range = sqrt(point.x * point.x + point.y * point.y + point.z * point.z);
+                if (range < m_cfg_f_range_image_min_dist_m)
                     continue;
-
                 qry_scan_aligned->points.push_back(point);
             }
-            
+
+            // 将点云变换到地图坐标系
             pcl::transformPointCloud(*qry_scan_aligned, *qry_scan_aligned, i_poses[idx]);
             *total_map += *qry_scan_aligned;
 
-            if(m_cfg_b_use_prediction_write == false && m_cfg_b_mapping_use_visualization == false)
+            // 释放内存
+            if (m_cfg_b_use_prediction_write == false && m_cfg_b_mapping_use_visualization == false)
             {
                 qry_frame.m_scan.reset();
                 qry_frame.m_scan_ptrs.reset();
             }
 
+            // 计算并显示处理时间和进度
             duration = std::chrono::high_resolution_clock::now() - align_start_time;
             align_time_ms = duration.count();
             sum_align_time_ms += align_time_ms;
 
             float progress = static_cast<float>(idx + 1) / i_poses.size() * 100.0f;
             std::cout << "\rScan align with downsampling Progress: " << std::setw(6) << std::fixed << std::setprecision(1)
-                    << progress << "% (" << (idx + 1) << "/" << i_poses.size() << ") ave time : " << sum_align_time_ms / count << " ms" << std::flush;
+                      << progress << "% (" << (idx + 1) << "/" << i_poses.size() << ") ave time : " << sum_align_time_ms / count << " ms" << std::flush;
         }
         std::cout << "\n";
 
+        // 第四步:分离静态和动态地图
         pcl::PointCloud<PointTypeMOS>::Ptr static_map(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
         pcl::PointCloud<PointTypeMOS>::Ptr dynamic_map(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-        if(isEvaluationPointType == true)
+
+        if (isEvaluationPointType == true)
         {
+            // 评估模式下的处理
             pcl::PointCloud<PointTypeMOSEval>::Ptr total_map_eval(boost::make_shared<pcl::PointCloud<PointTypeMOSEval>>());
             pcl::copyPointCloud(*total_map, *total_map_eval);
-            // VoxelDownSamplingPreservingLabels(total_map_eval, m_cfg_f_mapping_voxel_leaf_size_m, *total_map_eval);
             VoxelDownSamplingPreservingLabelsLargeScale(total_map_eval, m_cfg_f_mapping_section_division_length_m, m_cfg_f_mapping_voxel_leaf_size_m, *total_map_eval);
             pcl::copyPointCloud(*total_map_eval, *total_map);
 
-            for (const auto& point : total_map->points) 
+            // 根据RGB值分离静态和动态点云
+            for (const auto &point : total_map->points)
             {
-                if((point.r >= point.g || point.b >= point.g)) // Filtering non-dynamic points
+                if ((point.r >= point.g || point.b >= point.g)) // 过滤非动态点
                     static_map->points.push_back(point);
                 else
                     dynamic_map->points.push_back(point);
@@ -283,10 +336,11 @@ void AWV_MOS::RunStaticMapping(const std::vector<pcl::PointCloud<PointTypeMOS>::
         }
         else
         {
+            // 普通模式下的处理
             VoxelDownSamplingLargeScale(total_map, m_cfg_f_mapping_section_division_length_m, m_cfg_f_mapping_voxel_leaf_size_m, *total_map);
-            for (const auto& point : total_map->points) 
+            for (const auto &point : total_map->points)
             {
-                if((point.r >= point.g || point.b >= point.g)) // Filtering non-dynamic points
+                if ((point.r >= point.g || point.b >= point.g)) // 过滤非动态点
                     static_map->points.push_back(point);
                 else
                     dynamic_map->points.push_back(point);
@@ -320,9 +374,9 @@ void AWV_MOS::SaveConfigParams()
 
     std::ifstream config_src(m_config_file_path, std::ios::binary);
     std::ofstream config_dst(config_log_file_path, std::ios::binary);
-    if (!config_src.is_open()) 
+    if (!config_src.is_open())
         ROS_WARN("Faile to open path: %s", m_config_file_path.c_str());
-    if (!config_dst.is_open()) 
+    if (!config_dst.is_open())
         ROS_WARN("Faile to open path: %s", config_log_file_path.c_str());
     config_dst << config_src.rdbuf();
     config_src.close();
@@ -331,17 +385,17 @@ void AWV_MOS::SaveConfigParams()
     return;
 }
 
-void AWV_MOS::GetSegmentedScan(pcl::PointCloud<PointTypeMOS>::Ptr& o_segmented_scan)
+void AWV_MOS::GetSegmentedScan(pcl::PointCloud<PointTypeMOS>::Ptr &o_segmented_scan)
 {
-    if(m_query_frame.m_scan != nullptr)
+    if (m_query_frame.m_scan != nullptr)
         o_segmented_scan = m_query_frame.m_scan;
     return;
 }
 
-bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f& i_tf_frame_to_map, const double& i_time_scanframe)
+bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f &i_tf_frame_to_map, const double &i_time_scanframe)
 {
     if ((m_cfg_b_use_ref_frame_instant_charge == true &&
-        m_deq_reference_frame_buffer.size() < m_cfg_n_mos_ref_frame_size) ||
+         m_deq_reference_frame_buffer.size() < m_cfg_n_mos_ref_frame_size) ||
         m_deq_reference_frame_buffer.size() == 0)
         return true;
 
@@ -352,17 +406,17 @@ bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f& i_tf_frame_to_map, const 
     pcl::getTranslationAndEulerAngles(transBetween, x, y, z, roll, pitch, yaw);
 
     double prev_time_s = m_deq_reference_frame_buffer.back().m_time_s;
-    if (abs(roll)  < m_cfg_f_keyframe_rotation_threshold_rad &&
-        abs(pitch) < m_cfg_f_keyframe_rotation_threshold_rad && 
-        abs(yaw)   < m_cfg_f_keyframe_rotation_threshold_rad &&
-        sqrt(x*x + y*y + z*z) < m_cfg_f_keyframe_translation_threshold_m &&
+    if (abs(roll) < m_cfg_f_keyframe_rotation_threshold_rad &&
+        abs(pitch) < m_cfg_f_keyframe_rotation_threshold_rad &&
+        abs(yaw) < m_cfg_f_keyframe_rotation_threshold_rad &&
+        sqrt(x * x + y * y + z * z) < m_cfg_f_keyframe_translation_threshold_m &&
         i_time_scanframe - prev_time_s < m_cfg_f_keyframe_time_threshold_s)
-            return false;
+        return false;
 
     return true;
 }
 
-bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f& i_tf_prev_frame_to_map, const double& i_time_prev_scanframe, const Eigen::Affine3f& i_tf_pres_frame_to_map, const double& i_time_pres_scanframe)
+bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f &i_tf_prev_frame_to_map, const double &i_time_prev_scanframe, const Eigen::Affine3f &i_tf_pres_frame_to_map, const double &i_time_pres_scanframe)
 {
 
     Eigen::Affine3f transStart = i_tf_prev_frame_to_map;
@@ -372,12 +426,12 @@ bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f& i_tf_prev_frame_to_map, c
     pcl::getTranslationAndEulerAngles(transBetween, x, y, z, roll, pitch, yaw);
     double time_diff = i_time_pres_scanframe - i_time_prev_scanframe;
 
-    if (abs(roll)  < m_cfg_f_keyframe_rotation_threshold_rad &&
-        abs(pitch) < m_cfg_f_keyframe_rotation_threshold_rad && 
-        abs(yaw)   < m_cfg_f_keyframe_rotation_threshold_rad &&
-        sqrt(x*x + y*y + z*z) < m_cfg_f_keyframe_translation_threshold_m &&
+    if (abs(roll) < m_cfg_f_keyframe_rotation_threshold_rad &&
+        abs(pitch) < m_cfg_f_keyframe_rotation_threshold_rad &&
+        abs(yaw) < m_cfg_f_keyframe_rotation_threshold_rad &&
+        sqrt(x * x + y * y + z * z) < m_cfg_f_keyframe_translation_threshold_m &&
         time_diff < m_cfg_f_keyframe_time_threshold_s)
-            return false;
+        return false;
 
     return true;
 }
@@ -385,35 +439,35 @@ bool AWV_MOS::KeyframeSelection(const Eigen::Affine3f& i_tf_prev_frame_to_map, c
 void AWV_MOS::Reset()
 {
     m_deq_reference_frame_buffer.clear();
-    
+
     return;
 }
 
-void AWV_MOS::WritePrediction(const pcl::PointCloud<PointTypeMOS>::Ptr& i_segmented_scan, const std::string& i_save_path)
+void AWV_MOS::WritePrediction(const pcl::PointCloud<PointTypeMOS>::Ptr &i_segmented_scan, const std::string &i_save_path)
 {
     std::ofstream out;
     out.open(i_save_path, std::ios::out | std::ios::binary);
-    if (!out.is_open()) 
+    if (!out.is_open())
     {
         std::cout << "[WritePrediction] Fail to open i_save_path: " << i_save_path << "\n";
         return;
     }
-    
-    for(int i = 0; i < i_segmented_scan->points.size(); i++)
+
+    for (int i = 0; i < i_segmented_scan->points.size(); i++)
     {
         // Moving point check
-		uint8_t static_belief = i_segmented_scan->points[i].r;
-		uint8_t moving_belief = i_segmented_scan->points[i].g;
-		uint8_t unknown_belief = i_segmented_scan->points[i].b;
-		if (moving_belief > static_belief && moving_belief > unknown_belief) // moving filter
-		{
+        uint8_t static_belief = i_segmented_scan->points[i].r;
+        uint8_t moving_belief = i_segmented_scan->points[i].g;
+        uint8_t unknown_belief = i_segmented_scan->points[i].b;
+        if (moving_belief > static_belief && moving_belief > unknown_belief) // moving filter
+        {
             int tmp = 251;
-            out.write((char*)&tmp, sizeof(int));   
-		}
+            out.write((char *)&tmp, sizeof(int));
+        }
         else
         {
             int tmp = 9;
-            out.write((char*)&tmp, sizeof(int));
+            out.write((char *)&tmp, sizeof(int));
         }
     }
 
@@ -422,35 +476,34 @@ void AWV_MOS::WritePrediction(const pcl::PointCloud<PointTypeMOS>::Ptr& i_segmen
     return;
 }
 
-ScanFrame AWV_MOS::SegmentMovingObject(const pcl::PointCloud<PointTypeMOS>::Ptr& i_scan, const Eigen::Affine3f& i_tf_frame_to_map, const int& i_frame_id, const double& i_time_s, const bool& i_is_keyframe, const bool& i_is_prior)
+ScanFrame AWV_MOS::SegmentMovingObject(const pcl::PointCloud<PointTypeMOS>::Ptr &i_scan, const Eigen::Affine3f &i_tf_frame_to_map, const int &i_frame_id, const double &i_time_s, const bool &i_is_keyframe, const bool &i_is_prior)
 {
     // Initialize variables for ScanFrame setup
     int qry_scan_size = i_scan->points.size();
     std::vector<bool> init_checkker(qry_scan_size, false);
     pcl::PointCloud<PointTypeMOS>::Ptr scan(boost::make_shared<pcl::PointCloud<PointTypeMOS>>(*i_scan));
-    pcl::PointCloud<PointTypeMOS*>::Ptr scan_ptrs(boost::make_shared<pcl::PointCloud<PointTypeMOS*>>());
+    pcl::PointCloud<PointTypeMOS *>::Ptr scan_ptrs(boost::make_shared<pcl::PointCloud<PointTypeMOS *>>());
     scan_ptrs->resize(qry_scan_size);
     Eigen::Affine3f tf_frame_to_map(i_tf_frame_to_map);
     std::shared_ptr<std::vector<float>> range_image = nullptr;
     int frame_id = i_frame_id;
     int keyframe_id = -1;
     double time_s = i_time_s;
-    if(i_is_keyframe == true)
+    if (i_is_keyframe == true)
     {
         static int keyframe_count = 0;
         keyframe_id = ++keyframe_count - 1;
         range_image = std::make_shared<std::vector<float>>(m_num_range_image_pixels);
     }
 
-	int ref_frames_num = m_deq_reference_frame_buffer.size();
-	std::vector<float> vec_variance_trans(ref_frames_num, 0);
-	std::vector<float> vec_variance_rot(ref_frames_num, 0);
-	std::vector<Eigen::Affine3f> vec_tf_qrt_to_ref(ref_frames_num);
-	std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> vec_qry_scan_aligned(ref_frames_num, nullptr);
+    int ref_frames_num = m_deq_reference_frame_buffer.size();
+    std::vector<float> vec_variance_trans(ref_frames_num, 0);
+    std::vector<float> vec_variance_rot(ref_frames_num, 0);
+    std::vector<Eigen::Affine3f> vec_tf_qrt_to_ref(ref_frames_num);
+    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> vec_qry_scan_aligned(ref_frames_num, nullptr);
 
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) ref_frames_num, [&](size_t kf_i) 
+    tbb::parallel_for(
+        size_t(0), (size_t)ref_frames_num, [&](size_t kf_i)
         {			
             // - compute query frame pose uncertainty w.r.t reference frame
             int ref_frame_idx = m_deq_reference_frame_buffer[kf_i].m_frame_id;
@@ -473,14 +526,11 @@ ScanFrame AWV_MOS::SegmentMovingObject(const pcl::PointCloud<PointTypeMOS>::Ptr&
             // - transform query frame w.r.t reference frame
             pcl::PointCloud<PointTypeMOS>::Ptr qry_scan_aligned(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
             pcl::transformPointCloud(*scan, *qry_scan_aligned, tf_qry_to_ref);
-            vec_qry_scan_aligned[kf_i] = qry_scan_aligned;
-		}
-	);
+            vec_qry_scan_aligned[kf_i] = qry_scan_aligned; });
 
     // Initialize
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) qry_scan_size, [&](size_t po_i) 
+    tbb::parallel_for(
+        size_t(0), (size_t)qry_scan_size, [&](size_t po_i)
         {
             // Set pointer cloud
             scan_ptrs->points[po_i] = &(scan->points[po_i]);
@@ -510,12 +560,10 @@ ScanFrame AWV_MOS::SegmentMovingObject(const pcl::PointCloud<PointTypeMOS>::Ptr&
                 {
                     (*range_image)[index] = r_m;
                 }
-            }
-        }
-    );
+            } });
 
     // RangeImgae Noise Filtering
-    if(m_cfg_b_use_range_image_noise_filtering == true && i_is_keyframe == true)
+    if (m_cfg_b_use_range_image_noise_filtering == true && i_is_keyframe == true)
     {
         std::shared_ptr<std::vector<float>> range_image_filtered = nullptr;
         range_image_filtered = std::make_shared<std::vector<float>>(m_num_range_image_pixels);
@@ -523,9 +571,8 @@ ScanFrame AWV_MOS::SegmentMovingObject(const pcl::PointCloud<PointTypeMOS>::Ptr&
         range_image = range_image_filtered;
     }
 
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) qry_scan_size * ref_frames_num, [&](size_t i) 
+    tbb::parallel_for(
+        size_t(0), (size_t)qry_scan_size * ref_frames_num, [&](size_t i)
         {
             int kf_i = i / qry_scan_size;
             int po_i = i % qry_scan_size;
@@ -706,282 +753,278 @@ ScanFrame AWV_MOS::SegmentMovingObject(const pcl::PointCloud<PointTypeMOS>::Ptr&
                 p->r = result_belief[0];
                 p->g = result_belief[1];
                 p->b = result_belief[2];
-            }
-        }
-	);
+            } });
 
     return ScanFrame(scan, scan_ptrs, tf_frame_to_map, range_image, frame_id, keyframe_id, time_s);
 }
 
-void AWV_MOS::ObjectScaleTest(ScanFrame& i_frame)
+void AWV_MOS::ObjectScaleTest(ScanFrame &i_frame)
 {
-	// Method. KDtree based
-	// - make dynamic point cloud
-	pcl::PointCloud<PointTypeMOS*>::Ptr moving_ptrs(new pcl::PointCloud<PointTypeMOS*>());
-	pcl::PointCloud<PointTypeMOS>::Ptr moving_points(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-	for(int pt_idx = 0; pt_idx < (int)i_frame.m_scan->points.size(); pt_idx++)
-	{
-		auto iter_point = &(i_frame.m_scan->points[pt_idx]);
+    // Method. KDtree based
+    // - make dynamic point cloud
+    pcl::PointCloud<PointTypeMOS *>::Ptr moving_ptrs(new pcl::PointCloud<PointTypeMOS *>());
+    pcl::PointCloud<PointTypeMOS>::Ptr moving_points(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
+    for (int pt_idx = 0; pt_idx < (int)i_frame.m_scan->points.size(); pt_idx++)
+    {
+        auto iter_point = &(i_frame.m_scan->points[pt_idx]);
 
-		// Moving point check
-		uint8_t static_belief = iter_point->r;
-		uint8_t moving_belief = iter_point->g;
-		uint8_t unknown_belief = iter_point->b;
-		if (moving_belief > static_belief && moving_belief > unknown_belief) // moving filter
-		{
-			moving_ptrs->points.push_back(iter_point);
-			moving_points->points.push_back(*iter_point);
-		}
-	}
+        // Moving point check
+        uint8_t static_belief = iter_point->r;
+        uint8_t moving_belief = iter_point->g;
+        uint8_t unknown_belief = iter_point->b;
+        if (moving_belief > static_belief && moving_belief > unknown_belief) // moving filter
+        {
+            moving_ptrs->points.push_back(iter_point);
+            moving_points->points.push_back(*iter_point);
+        }
+    }
 
-	// - False dynamic rejection
-	if(moving_points->points.size() > 0)
-		m_kdtree_scan_moving->setInputCloud(moving_points);
-	else
-		return;
-
-	std::vector<bool> verified_point_check(moving_ptrs->points.size(), false);
-	std::vector<bool> rejected_point_check(moving_ptrs->points.size(), false);
-	uint unverified_point_count = verified_point_check.size();
-	while(unverified_point_count > 0)
-	{
-		for(int moving_idx = 0; moving_idx < (int)moving_ptrs->points.size(); moving_idx++)
-		{
-			if(verified_point_check[moving_idx] == true)
-				continue;
-
-			auto moving_point_ptr = moving_ptrs->points[moving_idx];
-			std::vector<int> moving_point_search_idx;
-			std::vector<float> moving_point_search_dist;
-
-			m_kdtree_scan_moving->radiusSearch(*moving_point_ptr, m_cfg_f_object_scale_test_point_search_radius_m, moving_point_search_idx, moving_point_search_dist);
-
-			float x = moving_point_ptr->x;
-			float y = moving_point_ptr->y;
-			float z = moving_point_ptr->z;
-
-			// - Compute moving object height (min max height diff)
-			float min_height_m = z;
-			float max_height_m = z;
-			int searched_moving_point_count = 0;
-			for(int idx: moving_point_search_idx)
-			{
-				if(rejected_point_check[idx] == false)
-				{
-					float tmp_z = moving_points->points[idx].z;
-					if(tmp_z < min_height_m)
-						min_height_m = tmp_z;
-					else if(tmp_z > max_height_m)
-						max_height_m = tmp_z;
-					searched_moving_point_count++;
-				}
-			}
-			float object_height = max_height_m - min_height_m;
-			
-			// - Compute moving object visible area
-			float radial_distance_m = sqrt(x*x + y*y + z*z) + 1e-10f;
-			float theta_rad = acos(z/radial_distance_m);
-            float clamped_distance_m = radial_distance_m;
-            if(clamped_distance_m < m_cfg_f_object_scale_test_valid_visible_range_m)
-                clamped_distance_m = m_cfg_f_object_scale_test_valid_visible_range_m;
-			float point_area_m2 = clamped_distance_m * sin(theta_rad) * m_cfg_f_lidar_vertical_resolution_deg / 180.0 * M_PI 
-												* radial_distance_m * m_cfg_f_lidar_horizontal_resolution_deg / 180.0 * M_PI;
-			float visible_area_m2 = searched_moving_point_count * point_area_m2;
-
-			// 2-4. Modify point motion belief
-			if(visible_area_m2 < m_cfg_f_object_scale_test_min_visible_area_m2 || object_height < m_cfg_f_object_scale_test_min_height_m)
-			{
-				for(int point_idx: moving_point_search_idx)
-				{
-					if(rejected_point_check[point_idx] == false || verified_point_check[point_idx] == false)
-					{
-						PointTypeMOS* tmp_moving_point_ptr = moving_ptrs->points[point_idx];
-						tmp_moving_point_ptr->r = 0;
-						tmp_moving_point_ptr->g = 0;
-						tmp_moving_point_ptr->b = 255;
-
-						rejected_point_check[point_idx] = true;
-						if(verified_point_check[point_idx] == true) // This point shoud be tested again
-						{
-							verified_point_check[point_idx] = false;
-							unverified_point_count++;
-						}
-						else
-						{
-							verified_point_check[point_idx] = true;	
-							unverified_point_count--;
-						}
-					}
-				}
-			}
-			else
-			{
-				for(int point_idx: moving_point_search_idx)
-				{
-					if(verified_point_check[point_idx] == false)
-					{
-						if(rejected_point_check[point_idx] == true)
-						{
-							PointTypeMOS* tmp_moving_point_ptr = moving_ptrs->points[point_idx];
-							tmp_moving_point_ptr->rgb = moving_points->points[point_idx].rgb;
-							rejected_point_check[point_idx] = false;
-						}
-						verified_point_check[point_idx] = true;
-						unverified_point_count--;
-					}
-				}
-			}
-		}
-	}
-	return;
-}
-
-void AWV_MOS::RegionGrowing(ScanFrame& i_frame)
-{
-	// - Region growing
-	pcl::PointCloud<PointTypeMOS>::Ptr moving_pc(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-	pcl::PointCloud<PointTypeMOS>::Ptr static_unknown_pc(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-	pcl::PointCloud<PointTypeMOS*>::Ptr static_unknown_ptr_pc(new pcl::PointCloud<PointTypeMOS*>());
-	std::vector<bool> unknown_point_check;
-	for(int pt_idx = 0; pt_idx < (int)i_frame.m_scan->points.size(); pt_idx++)
-	{
-		auto iter_point = &(i_frame.m_scan->points[pt_idx]);
-
-		// Moving point check
-		uint8_t static_belief = iter_point->r;
-		uint8_t moving_belief = iter_point->g;
-		uint8_t unknown_belief = iter_point->b;
-
-		if (moving_belief > static_belief && moving_belief > unknown_belief) // moving filter
-		{
-			moving_pc->points.push_back(*iter_point);
-		}
-		else if(static_belief > moving_belief && static_belief > unknown_belief)
-		{
-			static_unknown_ptr_pc->points.push_back(iter_point);
-			static_unknown_pc->points.push_back(*iter_point);
-			unknown_point_check.push_back(false);
-		}
-		else if(unknown_belief > static_belief && unknown_belief > moving_belief)
-		{
-			static_unknown_ptr_pc->points.push_back(iter_point);
-			static_unknown_pc->points.push_back(*iter_point);
-			unknown_point_check.push_back(true);
-		}
-	}
-
-	m_kdtree_scan_unknown->setInputCloud(static_unknown_pc);
-
-	std::vector<bool> extended_point_check(static_unknown_pc->points.size(), false);
-	int debug_loop_count = 0;
-	static int debug_max_loop = 0;
-	static int debug_max_loop_idx = 0;
-	for(int loop_idx = 0; loop_idx < m_cfg_f_region_growing_max_iteration; loop_idx++)
-	{
-		pcl::PointCloud<PointTypeMOS>::Ptr filtered_moving_pc(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-		m_voxel_grid_filter_region_growing.setInputCloud(moving_pc);
-		m_voxel_grid_filter_region_growing.filter(*filtered_moving_pc);
-		moving_pc->clear();
-
-		if(filtered_moving_pc->points.size() == 0)
-			break;
-
-		for(int moving_idx = 0; moving_idx < (int)filtered_moving_pc->points.size(); moving_idx++)
-		{
-			PointTypeMOS moving_point = filtered_moving_pc->points[moving_idx];
-			std::vector<int> unknown_point_search_idx;
-			std::vector<float> unknown_point_search_dist;
-
-			// - Compute moving object visible area
-			float radial_distance_m = sqrt(moving_point.x*moving_point.x + moving_point.y*moving_point.y + moving_point.z*moving_point.z) + 1e-10f;
-			float theta_rad = acos(moving_point.z/radial_distance_m);
-			float point_area_m2 = radial_distance_m * sin(theta_rad) * m_cfg_f_lidar_vertical_resolution_deg / 180.0 * M_PI 
-												* radial_distance_m * m_cfg_f_lidar_horizontal_resolution_deg / 180.0 * M_PI;
-			float point_area_radius_expanded_m = sqrt(point_area_m2) * 2;
-
-			float search_radius_m = m_cfg_f_region_growing_point_search_radius_m;
-			if(m_cfg_f_region_growing_point_search_radius_m < point_area_radius_expanded_m)
-				search_radius_m = point_area_radius_expanded_m;
-
-			m_kdtree_scan_unknown->radiusSearch(moving_point, search_radius_m, unknown_point_search_idx, unknown_point_search_dist);
-
-			if(unknown_point_search_idx.size() == 0)
-				continue;
-
-			int searched_point_num = 0;
-			float max_height_m = moving_point.z;
-			float min_height_m = moving_point.z;
-			bool find_static_flag = false;
-			for(int point_idx = 0; point_idx < unknown_point_search_idx.size(); point_idx++)
-			{
-				if(extended_point_check[unknown_point_search_idx[point_idx]] == false)
-				{
-					PointTypeMOS searched_unknown_point = static_unknown_pc->points[unknown_point_search_idx[point_idx]];
-					if(max_height_m < searched_unknown_point.z)
-						max_height_m = searched_unknown_point.z;
-					if(min_height_m > searched_unknown_point.z)
-						min_height_m = searched_unknown_point.z;
-					searched_point_num++;
-				}
-
-				if(unknown_point_check[unknown_point_search_idx[point_idx]] == false)
-				{
-					find_static_flag = true;
-					break;
-				}
-			}
-
-			float object_height_m = fabs(max_height_m - min_height_m);
-
-			if(find_static_flag == true ||
-				(object_height_m < m_cfg_f_region_growing_ground_filter_height_m && searched_point_num >= 2) ||
-				searched_point_num == 0)
-				continue;
-
-			for(int unknown_idx = 0; unknown_idx < unknown_point_search_idx.size(); unknown_idx++)
-			{
-				if(extended_point_check[unknown_point_search_idx[unknown_idx]] == false)
-				{
-					PointTypeMOS* searched_unknown_point_ptr = static_unknown_ptr_pc->points[unknown_point_search_idx[unknown_idx]];
-					
-					searched_unknown_point_ptr->r = 0;
-					searched_unknown_point_ptr->g = ((255 + 1) / 2);
-					searched_unknown_point_ptr->b = ((255 - 1) / 2);
-
-					if(m_cfg_f_region_growing_max_iteration > 1)
-						moving_pc->points.push_back(*searched_unknown_point_ptr);
-					extended_point_check[unknown_point_search_idx[unknown_idx]] = true;
-				}
-			}
-		}
-	}
-	return;
-}
-
-void AWV_MOS::ManageBuffer(const ScanFrame& i_frame, const bool& i_is_keyframe)
-{
-    if(i_is_keyframe == false)
+    // - False dynamic rejection
+    if (moving_points->points.size() > 0)
+        m_kdtree_scan_moving->setInputCloud(moving_points);
+    else
         return;
 
-    if(m_deq_reference_frame_buffer.size() >= m_cfg_n_mos_ref_frame_size)
-        m_deq_reference_frame_buffer.pop_front();
+    std::vector<bool> verified_point_check(moving_ptrs->points.size(), false);
+    std::vector<bool> rejected_point_check(moving_ptrs->points.size(), false);
+    uint unverified_point_count = verified_point_check.size();
+    while (unverified_point_count > 0)
+    {
+        for (int moving_idx = 0; moving_idx < (int)moving_ptrs->points.size(); moving_idx++)
+        {
+            if (verified_point_check[moving_idx] == true)
+                continue;
 
-    m_deq_reference_frame_buffer.push_back(i_frame);
-    
+            auto moving_point_ptr = moving_ptrs->points[moving_idx];
+            std::vector<int> moving_point_search_idx;
+            std::vector<float> moving_point_search_dist;
+
+            m_kdtree_scan_moving->radiusSearch(*moving_point_ptr, m_cfg_f_object_scale_test_point_search_radius_m, moving_point_search_idx, moving_point_search_dist);
+
+            float x = moving_point_ptr->x;
+            float y = moving_point_ptr->y;
+            float z = moving_point_ptr->z;
+
+            // - Compute moving object height (min max height diff)
+            float min_height_m = z;
+            float max_height_m = z;
+            int searched_moving_point_count = 0;
+            for (int idx : moving_point_search_idx)
+            {
+                if (rejected_point_check[idx] == false)
+                {
+                    float tmp_z = moving_points->points[idx].z;
+                    if (tmp_z < min_height_m)
+                        min_height_m = tmp_z;
+                    else if (tmp_z > max_height_m)
+                        max_height_m = tmp_z;
+                    searched_moving_point_count++;
+                }
+            }
+            float object_height = max_height_m - min_height_m;
+
+            // - Compute moving object visible area
+            float radial_distance_m = sqrt(x * x + y * y + z * z) + 1e-10f;
+            float theta_rad = acos(z / radial_distance_m);
+            float clamped_distance_m = radial_distance_m;
+            if (clamped_distance_m < m_cfg_f_object_scale_test_valid_visible_range_m)
+                clamped_distance_m = m_cfg_f_object_scale_test_valid_visible_range_m;
+            float point_area_m2 = clamped_distance_m * sin(theta_rad) * m_cfg_f_lidar_vertical_resolution_deg / 180.0 * M_PI * radial_distance_m * m_cfg_f_lidar_horizontal_resolution_deg / 180.0 * M_PI;
+            float visible_area_m2 = searched_moving_point_count * point_area_m2;
+
+            // 2-4. Modify point motion belief
+            if (visible_area_m2 < m_cfg_f_object_scale_test_min_visible_area_m2 || object_height < m_cfg_f_object_scale_test_min_height_m)
+            {
+                for (int point_idx : moving_point_search_idx)
+                {
+                    if (rejected_point_check[point_idx] == false || verified_point_check[point_idx] == false)
+                    {
+                        PointTypeMOS *tmp_moving_point_ptr = moving_ptrs->points[point_idx];
+                        tmp_moving_point_ptr->r = 0;
+                        tmp_moving_point_ptr->g = 0;
+                        tmp_moving_point_ptr->b = 255;
+
+                        rejected_point_check[point_idx] = true;
+                        if (verified_point_check[point_idx] == true) // This point shoud be tested again
+                        {
+                            verified_point_check[point_idx] = false;
+                            unverified_point_count++;
+                        }
+                        else
+                        {
+                            verified_point_check[point_idx] = true;
+                            unverified_point_count--;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (int point_idx : moving_point_search_idx)
+                {
+                    if (verified_point_check[point_idx] == false)
+                    {
+                        if (rejected_point_check[point_idx] == true)
+                        {
+                            PointTypeMOS *tmp_moving_point_ptr = moving_ptrs->points[point_idx];
+                            tmp_moving_point_ptr->rgb = moving_points->points[point_idx].rgb;
+                            rejected_point_check[point_idx] = false;
+                        }
+                        verified_point_check[point_idx] = true;
+                        unverified_point_count--;
+                    }
+                }
+            }
+        }
+    }
     return;
 }
 
-ScanFrame AWV_MOS::InitScanFrame(const pcl::PointCloud<PointTypeMOS>::Ptr& i_scan, 
-                                    const Eigen::Affine3f& i_tf_frame_to_map, 
-                                    const int& i_frame_id, 
-                                    const double& i_time_s,
-                                    const bool& i_is_keyframe)
+void AWV_MOS::RegionGrowing(ScanFrame &i_frame)
+{
+    // - Region growing
+    pcl::PointCloud<PointTypeMOS>::Ptr moving_pc(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
+    pcl::PointCloud<PointTypeMOS>::Ptr static_unknown_pc(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
+    pcl::PointCloud<PointTypeMOS *>::Ptr static_unknown_ptr_pc(new pcl::PointCloud<PointTypeMOS *>());
+    std::vector<bool> unknown_point_check;
+    for (int pt_idx = 0; pt_idx < (int)i_frame.m_scan->points.size(); pt_idx++)
+    {
+        auto iter_point = &(i_frame.m_scan->points[pt_idx]);
+
+        // Moving point check
+        uint8_t static_belief = iter_point->r;
+        uint8_t moving_belief = iter_point->g;
+        uint8_t unknown_belief = iter_point->b;
+
+        if (moving_belief > static_belief && moving_belief > unknown_belief) // moving filter
+        {
+            moving_pc->points.push_back(*iter_point);
+        }
+        else if (static_belief > moving_belief && static_belief > unknown_belief)
+        {
+            static_unknown_ptr_pc->points.push_back(iter_point);
+            static_unknown_pc->points.push_back(*iter_point);
+            unknown_point_check.push_back(false);
+        }
+        else if (unknown_belief > static_belief && unknown_belief > moving_belief)
+        {
+            static_unknown_ptr_pc->points.push_back(iter_point);
+            static_unknown_pc->points.push_back(*iter_point);
+            unknown_point_check.push_back(true);
+        }
+    }
+
+    m_kdtree_scan_unknown->setInputCloud(static_unknown_pc);
+
+    std::vector<bool> extended_point_check(static_unknown_pc->points.size(), false);
+    int debug_loop_count = 0;
+    static int debug_max_loop = 0;
+    static int debug_max_loop_idx = 0;
+    for (int loop_idx = 0; loop_idx < m_cfg_f_region_growing_max_iteration; loop_idx++)
+    {
+        pcl::PointCloud<PointTypeMOS>::Ptr filtered_moving_pc(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
+        m_voxel_grid_filter_region_growing.setInputCloud(moving_pc);
+        m_voxel_grid_filter_region_growing.filter(*filtered_moving_pc);
+        moving_pc->clear();
+
+        if (filtered_moving_pc->points.size() == 0)
+            break;
+
+        for (int moving_idx = 0; moving_idx < (int)filtered_moving_pc->points.size(); moving_idx++)
+        {
+            PointTypeMOS moving_point = filtered_moving_pc->points[moving_idx];
+            std::vector<int> unknown_point_search_idx;
+            std::vector<float> unknown_point_search_dist;
+
+            // - Compute moving object visible area
+            float radial_distance_m = sqrt(moving_point.x * moving_point.x + moving_point.y * moving_point.y + moving_point.z * moving_point.z) + 1e-10f;
+            float theta_rad = acos(moving_point.z / radial_distance_m);
+            float point_area_m2 = radial_distance_m * sin(theta_rad) * m_cfg_f_lidar_vertical_resolution_deg / 180.0 * M_PI * radial_distance_m * m_cfg_f_lidar_horizontal_resolution_deg / 180.0 * M_PI;
+            float point_area_radius_expanded_m = sqrt(point_area_m2) * 2;
+
+            float search_radius_m = m_cfg_f_region_growing_point_search_radius_m;
+            if (m_cfg_f_region_growing_point_search_radius_m < point_area_radius_expanded_m)
+                search_radius_m = point_area_radius_expanded_m;
+
+            m_kdtree_scan_unknown->radiusSearch(moving_point, search_radius_m, unknown_point_search_idx, unknown_point_search_dist);
+
+            if (unknown_point_search_idx.size() == 0)
+                continue;
+
+            int searched_point_num = 0;
+            float max_height_m = moving_point.z;
+            float min_height_m = moving_point.z;
+            bool find_static_flag = false;
+            for (int point_idx = 0; point_idx < unknown_point_search_idx.size(); point_idx++)
+            {
+                if (extended_point_check[unknown_point_search_idx[point_idx]] == false)
+                {
+                    PointTypeMOS searched_unknown_point = static_unknown_pc->points[unknown_point_search_idx[point_idx]];
+                    if (max_height_m < searched_unknown_point.z)
+                        max_height_m = searched_unknown_point.z;
+                    if (min_height_m > searched_unknown_point.z)
+                        min_height_m = searched_unknown_point.z;
+                    searched_point_num++;
+                }
+
+                if (unknown_point_check[unknown_point_search_idx[point_idx]] == false)
+                {
+                    find_static_flag = true;
+                    break;
+                }
+            }
+
+            float object_height_m = fabs(max_height_m - min_height_m);
+
+            if (find_static_flag == true ||
+                (object_height_m < m_cfg_f_region_growing_ground_filter_height_m && searched_point_num >= 2) ||
+                searched_point_num == 0)
+                continue;
+
+            for (int unknown_idx = 0; unknown_idx < unknown_point_search_idx.size(); unknown_idx++)
+            {
+                if (extended_point_check[unknown_point_search_idx[unknown_idx]] == false)
+                {
+                    PointTypeMOS *searched_unknown_point_ptr = static_unknown_ptr_pc->points[unknown_point_search_idx[unknown_idx]];
+
+                    searched_unknown_point_ptr->r = 0;
+                    searched_unknown_point_ptr->g = ((255 + 1) / 2);
+                    searched_unknown_point_ptr->b = ((255 - 1) / 2);
+
+                    if (m_cfg_f_region_growing_max_iteration > 1)
+                        moving_pc->points.push_back(*searched_unknown_point_ptr);
+                    extended_point_check[unknown_point_search_idx[unknown_idx]] = true;
+                }
+            }
+        }
+    }
+    return;
+}
+
+void AWV_MOS::ManageBuffer(const ScanFrame &i_frame, const bool &i_is_keyframe)
+{
+    if (i_is_keyframe == false)
+        return;
+
+    if (m_deq_reference_frame_buffer.size() >= m_cfg_n_mos_ref_frame_size)
+        m_deq_reference_frame_buffer.pop_front();
+
+    m_deq_reference_frame_buffer.push_back(i_frame);
+
+    return;
+}
+
+ScanFrame AWV_MOS::InitScanFrame(const pcl::PointCloud<PointTypeMOS>::Ptr &i_scan,
+                                 const Eigen::Affine3f &i_tf_frame_to_map,
+                                 const int &i_frame_id,
+                                 const double &i_time_s,
+                                 const bool &i_is_keyframe)
 {
     int num_point = i_scan->points.size();
 
     // Initialize variables for ScanFrame setup
     pcl::PointCloud<PointTypeMOS>::Ptr scan = i_scan;
-    pcl::PointCloud<PointTypeMOS*>::Ptr scan_ptrs(boost::make_shared<pcl::PointCloud<PointTypeMOS*>>());
+    pcl::PointCloud<PointTypeMOS *>::Ptr scan_ptrs(boost::make_shared<pcl::PointCloud<PointTypeMOS *>>());
     scan_ptrs->resize(num_point);
     Eigen::Affine3f tf_frame_to_map(i_tf_frame_to_map);
     std::shared_ptr<std::vector<float>> range_image = nullptr;
@@ -989,17 +1032,16 @@ ScanFrame AWV_MOS::InitScanFrame(const pcl::PointCloud<PointTypeMOS>::Ptr& i_sca
     int keyframe_id = -1;
     double time_s = i_time_s;
 
-    if(i_is_keyframe == true)
+    if (i_is_keyframe == true)
     {
         static int keyframe_count = 0;
         keyframe_id = ++keyframe_count - 1;
         range_image = (std::make_shared<std::vector<float>>(m_num_range_image_pixels));
     }
-   
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) num_point, [&](size_t i) 
-		{      
+
+    tbb::parallel_for(
+        size_t(0), (size_t)num_point, [&](size_t i)
+        {      
             // Initialize rgb
             scan->points[i].r = 0;
             scan->points[i].g = 0;
@@ -1025,12 +1067,10 @@ ScanFrame AWV_MOS::InitScanFrame(const pcl::PointCloud<PointTypeMOS>::Ptr& i_sca
                 // Set pixel value
                 if (r_m > m_cfg_f_range_image_min_dist_m && ((*range_image)[index] <= 0.0 || (*range_image)[index] > r_m))
                     (*range_image)[index] = r_m;
-            }
-        }
-    );
+            } });
 
     // RangeImgae Noise Filtering
-    if(m_cfg_b_use_range_image_noise_filtering == true && i_is_keyframe == true)
+    if (m_cfg_b_use_range_image_noise_filtering == true && i_is_keyframe == true)
     {
         std::shared_ptr<std::vector<float>> range_image_filtered = nullptr;
         range_image_filtered = std::make_shared<std::vector<float>>(m_num_range_image_pixels);
@@ -1038,28 +1078,29 @@ ScanFrame AWV_MOS::InitScanFrame(const pcl::PointCloud<PointTypeMOS>::Ptr& i_sca
         range_image = range_image_filtered;
     }
 
-	return ScanFrame(scan, scan_ptrs, tf_frame_to_map, range_image, frame_id, keyframe_id, time_s);
+    return ScanFrame(scan, scan_ptrs, tf_frame_to_map, range_image, frame_id, keyframe_id, time_s);
 }
 
-void AWV_MOS::SelectReferenceFrames(const ScanFrame& i_query_frame, std::deque<ScanFrame>& o_reference_frames)
+void AWV_MOS::SelectReferenceFrames(const ScanFrame &i_query_frame, std::deque<ScanFrame> &o_reference_frames)
 {
     int qry_id = i_query_frame.m_frame_id;
 
     // Forward
     static std::deque<ScanFrame> forward_ref_frames;
     static int forward_last_keyframe_id = -1;
-    if(qry_id > 0)
-    {   int forward_next_keyframe_id = forward_last_keyframe_id+1;
-        if(forward_next_keyframe_id < m_vec_keyframe_frame_id_list.size())
+    if (qry_id > 0)
+    {
+        int forward_next_keyframe_id = forward_last_keyframe_id + 1;
+        if (forward_next_keyframe_id < m_vec_keyframe_frame_id_list.size())
         {
             int forward_next_frame_id = m_vec_keyframe_frame_id_list[forward_next_keyframe_id];
-            if(forward_next_frame_id < qry_id)
+            if (forward_next_frame_id < qry_id)
             {
                 forward_last_keyframe_id = forward_next_keyframe_id;
                 int forward_next_frame_idx = m_vec_keyframe_frame_index_list[forward_next_keyframe_id];
                 forward_ref_frames.push_back((*m_deq_frames_container)[forward_next_frame_idx]);
 
-                if(forward_ref_frames.size() > m_cfg_n_mos_ref_frame_size)
+                if (forward_ref_frames.size() > m_cfg_n_mos_ref_frame_size)
                     forward_ref_frames.pop_front();
             }
         }
@@ -1067,35 +1108,35 @@ void AWV_MOS::SelectReferenceFrames(const ScanFrame& i_query_frame, std::deque<S
 
     // Backward
     static std::deque<ScanFrame> backward_ref_frames;
-    if(m_cfg_b_mapping_use_mos_backward_update == true)
+    if (m_cfg_b_mapping_use_mos_backward_update == true)
     {
         static int backward_init = false;
-        if(backward_init == false)
+        if (backward_init == false)
         {
             backward_init = true;
             int keyframe_id = -1;
-            while(backward_ref_frames.size() < m_cfg_n_mos_ref_frame_size && keyframe_id < (int)m_vec_keyframe_frame_id_list.size())
+            while (backward_ref_frames.size() < m_cfg_n_mos_ref_frame_size && keyframe_id < (int)m_vec_keyframe_frame_id_list.size())
             {
                 keyframe_id++;
                 int frame_id = m_vec_keyframe_frame_id_list[keyframe_id];
                 int frame_idx = m_vec_keyframe_frame_index_list[keyframe_id];
-                if(frame_id > qry_id)
-                    backward_ref_frames.push_back((*m_deq_frames_container)[frame_idx]);       
+                if (frame_id > qry_id)
+                    backward_ref_frames.push_back((*m_deq_frames_container)[frame_idx]);
             }
         }
-        else if(backward_ref_frames.size() > 0)
+        else if (backward_ref_frames.size() > 0)
         {
             int backward_first_frame_id = backward_ref_frames.front().m_frame_id;
-            if(qry_id >= backward_first_frame_id)
+            if (qry_id >= backward_first_frame_id)
             {
                 backward_ref_frames.pop_front();
 
-                if(backward_ref_frames.size() > 0)
+                if (backward_ref_frames.size() > 0)
                 {
                     int backward_last_keyframe_id = backward_ref_frames.back().m_keyframe_id;
-                    if(backward_last_keyframe_id < m_vec_keyframe_frame_id_list.size() - 1)
+                    if (backward_last_keyframe_id < m_vec_keyframe_frame_id_list.size() - 1)
                     {
-                        int backward_next_keyframe_id = backward_last_keyframe_id+1;
+                        int backward_next_keyframe_id = backward_last_keyframe_id + 1;
                         int backward_next_frame_idx = m_vec_keyframe_frame_index_list[backward_next_keyframe_id];
                         backward_ref_frames.push_back((*m_deq_frames_container)[backward_next_frame_idx]);
                     }
@@ -1105,37 +1146,36 @@ void AWV_MOS::SelectReferenceFrames(const ScanFrame& i_query_frame, std::deque<S
     }
 
     std::deque<ScanFrame> reference_frames;
-    for(ScanFrame frame: forward_ref_frames)
+    for (ScanFrame frame : forward_ref_frames)
         reference_frames.push_back(frame);
-    for(ScanFrame frame: backward_ref_frames)
+    for (ScanFrame frame : backward_ref_frames)
         reference_frames.push_back(frame);
-    
+
     o_reference_frames = reference_frames;
 
     return;
 }
 
-void AWV_MOS::SegmentMovingObject(const ScanFrame& i_query_frame, const std::deque<ScanFrame>& i_reference_frames)
+void AWV_MOS::SegmentMovingObject(const ScanFrame &i_query_frame, const std::deque<ScanFrame> &i_reference_frames)
 {
     // Initialize variables for ScanFrame setup
     int qry_scan_size = i_query_frame.m_scan->points.size();
     std::vector<bool> init_checkker(qry_scan_size, false);
     pcl::PointCloud<PointTypeMOS>::Ptr scan = i_query_frame.m_scan;
-    pcl::PointCloud<PointTypeMOS*>::Ptr scan_ptrs(boost::make_shared<pcl::PointCloud<PointTypeMOS*>>());
+    pcl::PointCloud<PointTypeMOS *>::Ptr scan_ptrs(boost::make_shared<pcl::PointCloud<PointTypeMOS *>>());
     scan_ptrs->resize(qry_scan_size);
     Eigen::Affine3f tf_frame_to_map = i_query_frame.m_tf_frame_to_map;
     int frame_id = i_query_frame.m_frame_id;
 
-	int ref_frames_num = i_reference_frames.size();
-	std::vector<float> vec_variance_trans(ref_frames_num, 0);
-	std::vector<float> vec_variance_rot(ref_frames_num, 0);
-	std::vector<Eigen::Affine3f> vec_tf_qrt_to_ref(ref_frames_num);
-	std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> vec_qry_scan_aligned(ref_frames_num, nullptr);
+    int ref_frames_num = i_reference_frames.size();
+    std::vector<float> vec_variance_trans(ref_frames_num, 0);
+    std::vector<float> vec_variance_rot(ref_frames_num, 0);
+    std::vector<Eigen::Affine3f> vec_tf_qrt_to_ref(ref_frames_num);
+    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> vec_qry_scan_aligned(ref_frames_num, nullptr);
 
-	// - Precalculate some infomation (pose uncertainty, frame transformation, transformed query frame)
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) ref_frames_num, [&](size_t kf_i) 
+    // - Precalculate some infomation (pose uncertainty, frame transformation, transformed query frame)
+    tbb::parallel_for(
+        size_t(0), (size_t)ref_frames_num, [&](size_t kf_i)
         {			
             // - compute query frame pose uncertainty w.r.t reference frame
             int ref_frame_idx = i_reference_frames[kf_i].m_frame_id;
@@ -1151,13 +1191,10 @@ void AWV_MOS::SegmentMovingObject(const ScanFrame& i_query_frame, const std::deq
             // - transform query frame w.r.t reference frame
             pcl::PointCloud<PointTypeMOS>::Ptr qry_scan_aligned(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
             pcl::transformPointCloud(*scan, *qry_scan_aligned, tf_qry_to_ref);
-            vec_qry_scan_aligned[kf_i] = qry_scan_aligned;
-		}
-	);
+            vec_qry_scan_aligned[kf_i] = qry_scan_aligned; });
 
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) qry_scan_size * ref_frames_num, [&](size_t i) 
+    tbb::parallel_for(
+        size_t(0), (size_t)qry_scan_size * ref_frames_num, [&](size_t i)
         {
             int kf_i = i / qry_scan_size;
             int po_i = i % qry_scan_size;
@@ -1338,16 +1375,14 @@ void AWV_MOS::SegmentMovingObject(const ScanFrame& i_query_frame, const std::deq
                 p->r = result_belief[0];
                 p->g = result_belief[1];
                 p->b = result_belief[2];
-            }
-        }
-	);
+            } });
 
     return;
 }
 
-void AWV_MOS::VoxelDownSamplingPreservingLabels(const pcl::PointCloud<PointTypeMOSEval>::Ptr& i_src, const float& i_voxel_leaf_size_m, pcl::PointCloud<PointTypeMOSEval>& o_dst)
+void AWV_MOS::VoxelDownSamplingPreservingLabels(const pcl::PointCloud<PointTypeMOSEval>::Ptr &i_src, const float &i_voxel_leaf_size_m, pcl::PointCloud<PointTypeMOSEval> &o_dst)
 {
-    if(i_src->points.size() <= 0)
+    if (i_src->points.size() <= 0)
         return;
 
     pcl::PointCloud<PointTypeMOSEval>::Ptr ptr_voxelized(new pcl::PointCloud<PointTypeMOSEval>);
@@ -1367,11 +1402,12 @@ void AWV_MOS::VoxelDownSamplingPreservingLabels(const pcl::PointCloud<PointTypeM
 
     int K = 1;
 
-    std::vector<int>   pointIdxNKNSearch(K);
+    std::vector<int> pointIdxNKNSearch(K);
     std::vector<float> pointNKNSquaredDistance(K);
 
-    for (const auto &pt: ptr_voxelized->points) {
-        if (kdtree.nearestKSearch(pt, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0) 
+    for (const auto &pt : ptr_voxelized->points)
+    {
+        if (kdtree.nearestKSearch(pt, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0)
         {
             auto updated = pt;
             updated.label = (*i_src)[pointIdxNKNSearch[0]].label;
@@ -1382,8 +1418,8 @@ void AWV_MOS::VoxelDownSamplingPreservingLabels(const pcl::PointCloud<PointTypeM
     return;
 }
 
-void AWV_MOS::VoxelDownSamplingPreservingLabelsLargeScale(const pcl::PointCloud<PointTypeMOSEval>::Ptr& i_src, const float& i_section_division_length_m, const float& i_voxel_leaf_size_m, pcl::PointCloud<PointTypeMOSEval>& o_dst) 
-{       
+void AWV_MOS::VoxelDownSamplingPreservingLabelsLargeScale(const pcl::PointCloud<PointTypeMOSEval>::Ptr &i_src, const float &i_section_division_length_m, const float &i_voxel_leaf_size_m, pcl::PointCloud<PointTypeMOSEval> &o_dst)
+{
     PointTypeMOSEval minPt, maxPt;
     pcl::getMinMax3D(*i_src, minPt, maxPt);
 
@@ -1396,9 +1432,11 @@ void AWV_MOS::VoxelDownSamplingPreservingLabelsLargeScale(const pcl::PointCloud<
     int count = 0;
     int total_sections = x_divisions * y_divisions;
     pcl::PointCloud<PointTypeMOSEval>::Ptr total_cloud_DS(boost::make_shared<pcl::PointCloud<PointTypeMOSEval>>());
-    for (int i = 0; i < x_divisions; ++i) {
-        for (int j = 0; j < y_divisions; ++j) {
-            if(ros::ok() == false)
+    for (int i = 0; i < x_divisions; ++i)
+    {
+        for (int j = 0; j < y_divisions; ++j)
+        {
+            if (ros::ok() == false)
                 return;
 
             double min_x = minPt.x + i * x_step;
@@ -1422,7 +1460,7 @@ void AWV_MOS::VoxelDownSamplingPreservingLabelsLargeScale(const pcl::PointCloud<
             count++;
             float progress = static_cast<float>(count) / total_sections * 100.0f;
             std::cout << "\rVoxel downsampling Progress: " << std::setw(6) << std::fixed << std::setprecision(1)
-                    << progress << "% (" << (count) << "/" << total_sections << ")" << std::flush;
+                      << progress << "% (" << (count) << "/" << total_sections << ")" << std::flush;
         }
     }
     std::cout << "\n";
@@ -1432,8 +1470,8 @@ void AWV_MOS::VoxelDownSamplingPreservingLabelsLargeScale(const pcl::PointCloud<
     return;
 }
 
-void AWV_MOS::VoxelDownSamplingLargeScale(const pcl::PointCloud<PointTypeMOS>::Ptr& i_src, const float& i_section_division_length_m, const float& i_voxel_leaf_size_m, pcl::PointCloud<PointTypeMOS>& o_dst) 
-{       
+void AWV_MOS::VoxelDownSamplingLargeScale(const pcl::PointCloud<PointTypeMOS>::Ptr &i_src, const float &i_section_division_length_m, const float &i_voxel_leaf_size_m, pcl::PointCloud<PointTypeMOS> &o_dst)
+{
     PointTypeMOS minPt, maxPt;
     pcl::getMinMax3D(*i_src, minPt, maxPt);
 
@@ -1449,8 +1487,10 @@ void AWV_MOS::VoxelDownSamplingLargeScale(const pcl::PointCloud<PointTypeMOS>::P
     int count = 0;
     int total_sections = x_divisions * y_divisions;
     pcl::PointCloud<PointTypeMOS>::Ptr total_cloud_DS(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-    for (int i = 0; i < x_divisions; ++i) {
-        for (int j = 0; j < y_divisions; ++j) {
+    for (int i = 0; i < x_divisions; ++i)
+    {
+        for (int j = 0; j < y_divisions; ++j)
+        {
             pcl::PointCloud<PointTypeMOS>::Ptr sub_cloud(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
 
             double min_x = minPt.x + i * x_step;
@@ -1474,114 +1514,106 @@ void AWV_MOS::VoxelDownSamplingLargeScale(const pcl::PointCloud<PointTypeMOS>::P
             count++;
             float progress = static_cast<float>(count) / total_sections * 100.0f;
             std::cout << "\rVoxel downsampling Progress: " << std::setw(6) << std::fixed << std::setprecision(1)
-                    << progress << "% (" << (count) << "/" << total_sections << ")" << std::flush;
+                      << progress << "% (" << (count) << "/" << total_sections << ")" << std::flush;
         }
     }
     std::cout << "\n";
 
-    o_dst = *total_cloud_DS;    
+    o_dst = *total_cloud_DS;
 
     return;
 }
 
-void AWV_MOS::EvaluteMap(pcl::PointCloud<PointTypeMOSEval>::Ptr& i_src)
+void AWV_MOS::EvaluteMap(pcl::PointCloud<PointTypeMOSEval>::Ptr &i_src)
 {
     int scan_TP = 0;
     int scan_TN = 0;
     int scan_FP = 0;
     int scan_FN = 0;
-    
-    for(int idx = 0; idx < (int)i_src->points.size(); idx++)
+
+    for (int idx = 0; idx < (int)i_src->points.size(); idx++)
     {
         float progress = static_cast<float>(idx + 1) / i_src->points.size() * 100.0f;
-        if((int)(progress * 100) % 100 == 0 || progress == 100.0)
+        if ((int)(progress * 100) % 100 == 0 || progress == 100.0)
             std::cout << "\rMap Evaluation Progress: " << std::setw(6) << std::fixed << std::setprecision(1)
-                    << progress << "% (" << (idx + 1) << "/" << i_src->points.size() << ")" << std::flush;
+                      << progress << "% (" << (idx + 1) << "/" << i_src->points.size() << ")" << std::flush;
 
-		// Motion belief update
-		int static_belief = i_src->points[idx].r;
-		int moving_belief = i_src->points[idx].g;
-		int unknown_belief = i_src->points[idx].b;
+        // Motion belief update
+        int static_belief = i_src->points[idx].r;
+        int moving_belief = i_src->points[idx].g;
+        int unknown_belief = i_src->points[idx].b;
 
         bool predict_is_dynamic = (moving_belief > static_belief && moving_belief > unknown_belief);
 
         int gt_label = i_src->points[idx].label;
         bool gt_is_dynamic;
 
-        if(gt_label >= 9 && gt_label <= 99) // static
+        if (gt_label >= 9 && gt_label <= 99) // static
             gt_is_dynamic = false;
-        else if(gt_label >= 251 && gt_label <= 259)
+        else if (gt_label >= 251 && gt_label <= 259)
             gt_is_dynamic = true;
         else
             continue;
 
-        if(gt_is_dynamic == true && predict_is_dynamic == true)
+        if (gt_is_dynamic == true && predict_is_dynamic == true)
             scan_TP++;
-        else if(gt_is_dynamic == false && predict_is_dynamic == false)
+        else if (gt_is_dynamic == false && predict_is_dynamic == false)
             scan_TN++;
-        else if(gt_is_dynamic == true && predict_is_dynamic == false)
+        else if (gt_is_dynamic == true && predict_is_dynamic == false)
             scan_FN++;
-        else if(gt_is_dynamic == false && predict_is_dynamic == true)
+        else if (gt_is_dynamic == false && predict_is_dynamic == true)
             scan_FP++;
     }
     std::cout << "\n";
 
-    double scan_IoU = (double) (scan_TP + 1) / (double) (scan_TP + scan_FP + scan_FN + 1);
-    double scan_accuracy = (double) (scan_TP + scan_TN + 1) / (double) (scan_TP + scan_TN + scan_FP + scan_FN + 1);
-    double scan_precision = (double) (scan_TP + 1) / (double) (scan_TP + scan_FP + 1);
-    double scan_recall = (double) (scan_TP + 1) / (double) (scan_TP + scan_FN + 1);
-    double scan_PR = (double) (scan_TN + 1) / (double) (scan_TN + scan_FP + 1);
-    double scan_RR = (double) (scan_TP + 1) / (double) (scan_TP + scan_FN + 1);
-    double scan_score = (scan_PR + scan_RR) / 2.0; 
+    double scan_IoU = (double)(scan_TP + 1) / (double)(scan_TP + scan_FP + scan_FN + 1);
+    double scan_accuracy = (double)(scan_TP + scan_TN + 1) / (double)(scan_TP + scan_TN + scan_FP + scan_FN + 1);
+    double scan_precision = (double)(scan_TP + 1) / (double)(scan_TP + scan_FP + 1);
+    double scan_recall = (double)(scan_TP + 1) / (double)(scan_TP + scan_FN + 1);
+    double scan_PR = (double)(scan_TN + 1) / (double)(scan_TN + scan_FP + 1);
+    double scan_RR = (double)(scan_TP + 1) / (double)(scan_TP + scan_FN + 1);
+    double scan_score = (scan_PR + scan_RR) / 2.0;
 
     std::cout << std::fixed << std::setprecision(3);
-    std::cout << "[EvaluteMap] num points: " << i_src->points.size() 
-                << ", scan_IoU: " << scan_IoU 
-                << ", precision: " << scan_precision 
-                << ", recall: " << scan_recall 
-                << ", TP: " << scan_TP << ", TN: " << scan_TN << ", FP: " << scan_FP << ", FN: " << scan_FN << "\n";
+    std::cout << "[EvaluteMap] num points: " << i_src->points.size()
+              << ", scan_IoU: " << scan_IoU
+              << ", precision: " << scan_precision
+              << ", recall: " << scan_recall
+              << ", TP: " << scan_TP << ", TN: " << scan_TN << ", FP: " << scan_FP << ", FN: " << scan_FN << "\n";
 }
-
 
 std::array<uint8_t, 3> AWV_MOS::DempsterCombination(std::array<uint8_t, 3> i_src_belief, std::array<uint8_t, 3> i_other_belief)
 {
     std::array<uint8_t, 3> result_belief;
 
-	unsigned short denominator = (unsigned short)255*255 
-                        - (unsigned short)i_src_belief[0] * (unsigned short)i_other_belief[1] 
-                        - (unsigned short)i_src_belief[1] * (unsigned short)i_other_belief[0];
+    unsigned short denominator = (unsigned short)255 * 255 - (unsigned short)i_src_belief[0] * (unsigned short)i_other_belief[1] - (unsigned short)i_src_belief[1] * (unsigned short)i_other_belief[0];
 
-	if (denominator == 0)
-	{
-		result_belief[0] = 0;
-		result_belief[1] = 0;
-		result_belief[2] = 255;
+    if (denominator == 0)
+    {
+        result_belief[0] = 0;
+        result_belief[1] = 0;
+        result_belief[2] = 255;
 
-		return result_belief;
-	}
+        return result_belief;
+    }
 
-	unsigned short tmp_0 = ((unsigned short)i_src_belief[0] * (unsigned short)i_other_belief[2]
-                + (unsigned short)i_src_belief[2] * (unsigned short)i_other_belief[0]
-                + (unsigned short)i_src_belief[0] * (unsigned short)i_other_belief[0]) * (unsigned short)255 / denominator;
+    unsigned short tmp_0 = ((unsigned short)i_src_belief[0] * (unsigned short)i_other_belief[2] + (unsigned short)i_src_belief[2] * (unsigned short)i_other_belief[0] + (unsigned short)i_src_belief[0] * (unsigned short)i_other_belief[0]) * (unsigned short)255 / denominator;
 
-	unsigned short tmp_1 = ((unsigned short)i_src_belief[1] * (unsigned short)i_other_belief[2]
-                + (unsigned short)i_src_belief[2] * (unsigned short)i_other_belief[1]
-                + (unsigned short)i_src_belief[1] * (unsigned short)i_other_belief[1]) * (unsigned short)255 / denominator;
+    unsigned short tmp_1 = ((unsigned short)i_src_belief[1] * (unsigned short)i_other_belief[2] + (unsigned short)i_src_belief[2] * (unsigned short)i_other_belief[1] + (unsigned short)i_src_belief[1] * (unsigned short)i_other_belief[1]) * (unsigned short)255 / denominator;
 
-	unsigned short tmp_2 = (unsigned short)255 - tmp_1 - tmp_0;
-    
+    unsigned short tmp_2 = (unsigned short)255 - tmp_1 - tmp_0;
+
     result_belief[0] = tmp_0;
     result_belief[1] = tmp_1;
     result_belief[2] = tmp_2;
 
-	return result_belief;
+    return result_belief;
 }
 
-void AWV_MOS::RangeImageNoiseFiltering(const std::shared_ptr<std::vector<float>>& i_range_image, std::shared_ptr<std::vector<float>>& o_range_image_filtered)
+void AWV_MOS::RangeImageNoiseFiltering(const std::shared_ptr<std::vector<float>> &i_range_image, std::shared_ptr<std::vector<float>> &o_range_image_filtered)
 {
-    tbb::parallel_for
-	(
-        size_t(0), (size_t) m_num_range_image_pixels, [&](size_t center_pixel_idx) 
+    tbb::parallel_for(
+        size_t(0), (size_t)m_num_range_image_pixels, [&](size_t center_pixel_idx)
         {		
             // int center_pixel_idx = pixel_u + pixel_v * m_num_range_image_cols;
             int pixel_u =  center_pixel_idx % m_num_range_image_cols;
@@ -1625,71 +1657,68 @@ void AWV_MOS::RangeImageNoiseFiltering(const std::shared_ptr<std::vector<float>>
             }
 
             if(min_diff_m < m_cfg_f_range_image_noise_filtering_min_diff_m)
-                (*o_range_image_filtered)[center_pixel_idx] = (*i_range_image)[center_pixel_idx];
-        }
-    );
+                (*o_range_image_filtered)[center_pixel_idx] = (*i_range_image)[center_pixel_idx]; });
     return;
 }
 
-
-float AWV_MOS::PointToWindowComparision(const std::shared_ptr<std::vector<float>>& i_range_image, 
-                                        const Eigen::Vector3f& i_spherical_point_m_rad, 
-                                        const int& i_winow_u_size, 
-                                        const int& i_winow_v_size, 
-                                        const float& i_observavle_radial_distance_range)
+float AWV_MOS::PointToWindowComparision(const std::shared_ptr<std::vector<float>> &i_range_image,
+                                        const Eigen::Vector3f &i_spherical_point_m_rad,
+                                        const int &i_winow_u_size,
+                                        const int &i_winow_v_size,
+                                        const float &i_observavle_radial_distance_range)
 {
     if (i_range_image == nullptr)
-		return 0.0;
+        return 0.0;
 
-	// Comptue pixel where query point is projected 
-	int pixel_u = (- i_spherical_point_m_rad(2) * RADtoDEG + 180.0) / m_cfg_f_lidar_horizontal_resolution_deg;
-	int pixel_v = ((M_PI - i_spherical_point_m_rad(1)) * RADtoDEG - (m_cfg_f_lidar_vertical_fov_lower_bound_deg + 90.)) / m_cfg_f_lidar_vertical_resolution_deg;
-	pixel_v = std::clamp(pixel_v, 0, m_num_range_image_rows - 1);
-	int pixel_idx = pixel_u + pixel_v * m_num_range_image_cols;
+    // Comptue pixel where query point is projected
+    int pixel_u = (-i_spherical_point_m_rad(2) * RADtoDEG + 180.0) / m_cfg_f_lidar_horizontal_resolution_deg;
+    int pixel_v = ((M_PI - i_spherical_point_m_rad(1)) * RADtoDEG - (m_cfg_f_lidar_vertical_fov_lower_bound_deg + 90.)) / m_cfg_f_lidar_vertical_resolution_deg;
+    pixel_v = std::clamp(pixel_v, 0, m_num_range_image_rows - 1);
+    int pixel_idx = pixel_u + pixel_v * m_num_range_image_cols;
 
-	// Search distance in hash table
-	float closest_dist_m = INFINITY;
+    // Search distance in hash table
+    float closest_dist_m = INFINITY;
 
-	for(int win_pix_u = 0; win_pix_u < i_winow_u_size; win_pix_u++)
-	{
-		for(int win_pix_v = 0; win_pix_v < i_winow_v_size; win_pix_v++)
-		{
-			int win_pix_u_idx = pixel_u + (win_pix_u - (i_winow_u_size - 1) / 2);
-			if(win_pix_u_idx < 0)
-			{
-				win_pix_u_idx += m_num_range_image_cols;
-			}
-			else if(win_pix_u_idx > m_num_range_image_cols - 1)
-			{
-				win_pix_u_idx -= m_num_range_image_cols;
-			}
+    for (int win_pix_u = 0; win_pix_u < i_winow_u_size; win_pix_u++)
+    {
+        for (int win_pix_v = 0; win_pix_v < i_winow_v_size; win_pix_v++)
+        {
+            int win_pix_u_idx = pixel_u + (win_pix_u - (i_winow_u_size - 1) / 2);
+            if (win_pix_u_idx < 0)
+            {
+                win_pix_u_idx += m_num_range_image_cols;
+            }
+            else if (win_pix_u_idx > m_num_range_image_cols - 1)
+            {
+                win_pix_u_idx -= m_num_range_image_cols;
+            }
 
-			// int win_pix_u_idx = std::max(std::min(iHorizontalAngle + (win_pix_u - (i_window_u_size - 1) / 2), m_num_range_image_cols - 1), 0);
-			int win_pix_v_idx = std::clamp(pixel_v + (win_pix_v - (i_winow_v_size - 1) / 2), 0, m_num_range_image_rows - 1);
-			// int win_pix_v_idx = std::max(std::min(iVerticalAngle + (win_pix_v - (i_window_v_size - 1) / 2), m_num_range_image_rows - 1), 0);
-			int pix_idx = win_pix_u_idx + win_pix_v_idx * m_num_range_image_cols;
+            // int win_pix_u_idx = std::max(std::min(iHorizontalAngle + (win_pix_u - (i_window_u_size - 1) / 2), m_num_range_image_cols - 1), 0);
+            int win_pix_v_idx = std::clamp(pixel_v + (win_pix_v - (i_winow_v_size - 1) / 2), 0, m_num_range_image_rows - 1);
+            // int win_pix_v_idx = std::max(std::min(iVerticalAngle + (win_pix_v - (i_window_v_size - 1) / 2), m_num_range_image_rows - 1), 0);
+            int pix_idx = win_pix_u_idx + win_pix_v_idx * m_num_range_image_cols;
 
-			// Insert data
-			float reference_point_r_m = (*i_range_image)[pix_idx];
-			if(reference_point_r_m <= 0.0)
-				continue;
-				
-			if(reference_point_r_m < closest_dist_m)
-			{
-				closest_dist_m = reference_point_r_m;
-			}
+            // Insert data
+            float reference_point_r_m = (*i_range_image)[pix_idx];
+            if (reference_point_r_m <= 0.0)
+                continue;
 
-			if(i_spherical_point_m_rad(0) - closest_dist_m > i_observavle_radial_distance_range)
-			{
-				return closest_dist_m;
-			}
-		}
-	}
+            if (reference_point_r_m < closest_dist_m)
+            {
+                closest_dist_m = reference_point_r_m;
+            }
 
-	if(closest_dist_m == INFINITY)
-	{
-		return 0.0;
-	}
-	
-	return closest_dist_m;
+            if (i_spherical_point_m_rad(0) - closest_dist_m > i_observavle_radial_distance_range)
+            {
+                return closest_dist_m;
+            }
+        }
+    }
+
+    if (closest_dist_m == INFINITY)
+    {
+        return 0.0;
+    }
+
+    return closest_dist_m;
 }
