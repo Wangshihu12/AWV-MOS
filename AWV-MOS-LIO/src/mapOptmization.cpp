@@ -1,4 +1,4 @@
-#define PCL_NO_PRECOMPILE 
+#define PCL_NO_PRECOMPILE
 
 #include "awv_mos_lio/cloud_info.h"
 
@@ -41,24 +41,21 @@
 #include <tbb/global_control.h>
 
 /*
-    * A point cloud type that has 6D pose info ([x,y,z,roll,pitch,yaw] intensity is time stamp)
-    */
+ * A point cloud type that has 6D pose info ([x,y,z,roll,pitch,yaw] intensity is time stamp)
+ */
 struct PointXYZIRPYT
 {
     PCL_ADD_POINT4D
-    PCL_ADD_INTENSITY;                  // preferred way of adding a XYZ+padding
+    PCL_ADD_INTENSITY; // preferred way of adding a XYZ+padding
     float roll;
     float pitch;
     float yaw;
     double time;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW   // make sure our new allocators are aligned
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW // make sure our new allocators are aligned
 } EIGEN_ALIGN16;                    // enforce SSE padding for correct memory alignment
 
-POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIRPYT,
-                                   (float, x, x) (float, y, y)
-                                   (float, z, z) (float, intensity, intensity)
-                                   (float, roll, roll) (float, pitch, pitch) (float, yaw, yaw)
-                                   (double, time, time))
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRPYT,
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(float, roll, roll)(float, pitch, pitch)(float, yaw, yaw)(double, time, time))
 
 // Evaluation Expression
 using PointTypePose = PointXYZIRPYT;
@@ -66,46 +63,38 @@ using PointTypePose = PointXYZIRPYT;
 #ifndef _POINT_TYPE_DEFINITION_
 #define _POINT_TYPE_DEFINITION_
 #ifdef USE_EVALUATION_POINT_TYPE
-    struct EIGEN_ALIGN16 PointXYZIRTRGBL
-    {
-        PCL_ADD_POINT4D
-        PCL_ADD_INTENSITY
-        std::uint16_t ring;
-        float time;
-        PCL_ADD_RGB
-        std::uint16_t label;
-        PCL_MAKE_ALIGNED_OPERATOR_NEW   // make sure our new allocators are aligned
-    } ;                    // enforce SSE padding for correct memory alignment
+struct EIGEN_ALIGN16 PointXYZIRTRGBL
+{
+    PCL_ADD_POINT4D
+    PCL_ADD_INTENSITY
+    std::uint16_t ring;
+    float time;
+    PCL_ADD_RGB
+    std::uint16_t label;
+    PCL_MAKE_ALIGNED_OPERATOR_NEW // make sure our new allocators are aligned
+}; // enforce SSE padding for correct memory alignment
 
-    POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRTRGBL,
-                                    (float, x, x) (float, y, y) (float, z, z) 
-                                    (float, intensity, intensity)
-                                    (std::uint16_t, ring, ring)
-                                    (float, time, time)
-                                    (std::uint32_t, rgb, rgb)
-                                    (std::uint16_t, label, label))
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRTRGBL,
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(std::uint16_t, ring, ring)(float, time, time)(std::uint32_t, rgb, rgb)(std::uint16_t, label, label))
 
-    // Evaluation Expression
-    using PointType = PointXYZIRTRGBL;
-    using PointTypeMOS = PointXYZIRTRGBL;
+// Evaluation Expression
+using PointType = PointXYZIRTRGBL;
+using PointTypeMOS = PointXYZIRTRGBL;
 #else
-    struct PointXYZIRGB
-    {
-        PCL_ADD_POINT4D
-        PCL_ADD_INTENSITY
-        PCL_ADD_RGB
-        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    } EIGEN_ALIGN16;
-    POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIRGB,
-        (float, x, x) (float, y, y) (float, z, z) (float, intensity, intensity)
-        (std::uint32_t, rgb, rgb)
-    )
-    // Normal Expression
-    using PointType = pcl::PointXYZI;
-    using PointTypeMOS = PointXYZIRGB;
+struct PointXYZIRGB
+{
+    PCL_ADD_POINT4D
+    PCL_ADD_INTENSITY
+    PCL_ADD_RGB
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+} EIGEN_ALIGN16;
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRGB,
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(std::uint32_t, rgb, rgb))
+// Normal Expression
+using PointType = pcl::PointXYZI;
+using PointTypeMOS = PointXYZIRGB;
 #endif
 #endif
-
 
 using namespace gtsam;
 
@@ -114,155 +103,169 @@ static std::mutex m_mutexInputPointCloud;
 class mapOptimization
 {
 public:
-    ros::Publisher pubLaserCloudSurround;
-    ros::Publisher pubLaserOdometryGlobal;
-    ros::Publisher pubLaserOdometryIncremental;
-    ros::Publisher pubLaserOdometryInitial;
-    ros::Publisher pubKeyPoses;
-    ros::Publisher m_pubSrroundKeyPoses;
-    ros::Publisher pubPath;
+    // 发布相关的ROS话题
+    ros::Publisher pubLaserCloudSurround;       // 发布周围点云地图
+    ros::Publisher pubLaserOdometryGlobal;      // 发布全局里程计
+    ros::Publisher pubLaserOdometryIncremental; // 发布增量里程计
+    ros::Publisher pubLaserOdometryInitial;     // 发布初始里程计
+    ros::Publisher pubKeyPoses;                 // 发布关键帧位姿
+    ros::Publisher m_pubSrroundKeyPoses;        // 发布周围关键帧位姿
+    ros::Publisher pubPath;                     // 发布轨迹路径
 
-    ros::Publisher pubRecentKeyFrames;
-    ros::Publisher pubRecentKeyFrame;
-    ros::Publisher pubCloudRegisteredRaw;
+    ros::Publisher pubRecentKeyFrames;    // 发布最近的关键帧
+    ros::Publisher pubRecentKeyFrame;     // 发布最新的关键帧
+    ros::Publisher pubCloudRegisteredRaw; // 发布原始配准点云
 
-    ros::Publisher pubSLAMInfo;
+    ros::Publisher pubSLAMInfo; // 发布SLAM信息
 
-    ros::Subscriber subCloud;
+    ros::Subscriber subCloud; // 订阅点云信息
 
-    awv_mos_lio::cloud_info cloudInfo;
-    std::deque<awv_mos_lio::cloud_info> m_vec_cloud_info_queue;
+    // 点云数据结构
+    awv_mos_lio::cloud_info cloudInfo;                          // 当前点云信息
+    std::deque<awv_mos_lio::cloud_info> m_vec_cloud_info_queue; // 点云信息队列
 
-    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> cornerCloudKeyFrames;
-    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> surfCloudKeyFrames;
-    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> CloudKeyFrames;
-    
-    pcl::PointCloud<PointType>::Ptr cloudKeyPoses3D;
-    pcl::PointCloud<PointType>::Ptr m_surroundingKeyPoses;
-    pcl::PointCloud<PointTypePose>::Ptr cloudKeyPoses6D;
+    // 关键帧点云存储
+    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> cornerCloudKeyFrames; // 角点特征关键帧
+    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> surfCloudKeyFrames;   // 平面特征关键帧
+    std::vector<pcl::PointCloud<PointTypeMOS>::Ptr> CloudKeyFrames;       // 完整点云关键帧
 
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerLast; // corner feature set from odoOptimization
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfLast; // surf feature set from odoOptimization
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerLastDS; // downsampled corner feature set from odoOptimization
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfLastDS; // downsampled surf feature set from odoOptimization
-    pcl::PointCloud<PointTypeMOS>::Ptr m_pres_scanframe;
-    pcl::PointCloud<PointTypeMOS>::Ptr m_pres_initial_segmented_scan;    
-    pcl::PointCloud<PointTypeMOS>::Ptr m_pres_segmented_scan;
+    // 位姿相关点云
+    pcl::PointCloud<PointType>::Ptr cloudKeyPoses3D;       // 3D关键帧位姿
+    pcl::PointCloud<PointType>::Ptr m_surroundingKeyPoses; // 周围关键帧位姿
+    pcl::PointCloud<PointTypePose>::Ptr cloudKeyPoses6D;   // 6D关键帧位姿
 
-    pcl::PointCloud<PointType>::Ptr laserCloudOri;
-    pcl::PointCloud<PointType>::Ptr coeffSel;
+    // 特征点云
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerLast;          // 上一帧角点特征
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfLast;            // 上一帧平面特征
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerLastDS;        // 下采样后的角点特征
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfLastDS;          // 下采样后的平面特征
+    pcl::PointCloud<PointTypeMOS>::Ptr m_pres_scanframe;              // 当前扫描帧
+    pcl::PointCloud<PointTypeMOS>::Ptr m_pres_initial_segmented_scan; // 初始分割扫描结果
+    pcl::PointCloud<PointTypeMOS>::Ptr m_pres_segmented_scan;         // 分割后的扫描结果
 
-    std::vector<PointType> laserCloudOriCornerVec; // corner point holder for parallel computation
-    std::vector<PointType> coeffSelCornerVec;
-    std::vector<bool> laserCloudOriCornerFlag;
-    std::vector<PointType> laserCloudOriSurfVec; // surf point holder for parallel computation
-    std::vector<PointType> coeffSelSurfVec;
-    std::vector<bool> laserCloudOriSurfFlag;
+    // 优化相关点云
+    pcl::PointCloud<PointType>::Ptr laserCloudOri; // 原始激光点云
+    pcl::PointCloud<PointType>::Ptr coeffSel;      // 特征系数
 
-    map<int, pair<pcl::PointCloud<PointTypeMOS>, pcl::PointCloud<PointTypeMOS>>> laserCloudMapContainer;
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerFromMap;
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfFromMap;
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerFromMapDS;
-    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfFromMapDS;
+    // 特征点存储容器(用于并行计算)
+    std::vector<PointType> laserCloudOriCornerVec; // 角点特征容器
+    std::vector<PointType> coeffSelCornerVec;      // 角点系数容器
+    std::vector<bool> laserCloudOriCornerFlag;     // 角点标志
+    std::vector<PointType> laserCloudOriSurfVec;   // 平面特征容器
+    std::vector<PointType> coeffSelSurfVec;        // 平面系数容器
+    std::vector<bool> laserCloudOriSurfFlag;       // 平面标志
 
-    pcl::KdTreeFLANN<PointTypeMOS>::Ptr kdtreeCornerFromMap;
-    pcl::KdTreeFLANN<PointTypeMOS>::Ptr kdtreeSurfFromMap;
+    // 地图数据结构
+    map<int, pair<pcl::PointCloud<PointTypeMOS>, pcl::PointCloud<PointTypeMOS>>> laserCloudMapContainer; // 地图容器
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerFromMap;                                          // 地图中的角点
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfFromMap;                                            // 地图中的平面点
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudCornerFromMapDS;                                        // 下采样后的地图角点
+    pcl::PointCloud<PointTypeMOS>::Ptr laserCloudSurfFromMapDS;                                          // 下采样后的地图平面点
 
+    // KD树
+    pcl::KdTreeFLANN<PointTypeMOS>::Ptr kdtreeCornerFromMap; // 角点特征KD树
+    pcl::KdTreeFLANN<PointTypeMOS>::Ptr kdtreeSurfFromMap;   // 平面特征KD树
 
-    pcl::VoxelGrid<PointTypeMOS> downSizeFilterCorner;
-    pcl::VoxelGrid<PointTypeMOS> downSizeFilterSurf;
-    pcl::VoxelGrid<PointType> downSizeFilterICP;
-    
-    ros::Time timeLaserInfoStamp;
-    double timeLaserInfoCur;
+    // 下采样滤波器
+    pcl::VoxelGrid<PointTypeMOS> downSizeFilterCorner; // 角点下采样
+    pcl::VoxelGrid<PointTypeMOS> downSizeFilterSurf;   // 平面下采样
+    pcl::VoxelGrid<PointType> downSizeFilterICP;       // ICP下采样
 
-    float transformTobeMapped[6];
-    float transformincremental[6];
-    float transformincrementalinitial[6];
-    float InitialPose[6];
+    // 时间戳
+    ros::Time timeLaserInfoStamp; // ROS时间戳
+    double timeLaserInfoCur;      // 当前激光时间
 
+    // 变换矩阵
+    float transformTobeMapped[6];         // 待配准的变换
+    float transformincremental[6];        // 增量变换
+    float transformincrementalinitial[6]; // 初始增量变换
+    float InitialPose[6];                 // 初始位姿
+
+    // 互斥锁
     std::mutex mtx;
     std::mutex mtxLoopInfo;
 
-    bool isDegenerate = false;
-    cv::Mat matP;
+    // 退化检查
+    bool isDegenerate = false; // 是否退化
+    cv::Mat matP;              // 协方差矩阵
 
-    int laserCloudCornerFromMapDSNum = 0;
-    int laserCloudSurfFromMapDSNum = 0;
-    int laserCloudCornerLastDSNum = 0;
-    int laserCloudSurfLastDSNum = 0;
+    // 特征点数量统计
+    int laserCloudCornerFromMapDSNum = 0; // 下采样地图角点数
+    int laserCloudSurfFromMapDSNum = 0;   // 下采样地图平面点数
+    int laserCloudCornerLastDSNum = 0;    // 下采样当前帧角点数
+    int laserCloudSurfLastDSNum = 0;      // 下采样当前帧平面点数
 
-    nav_msgs::Path globalPath;
+    nav_msgs::Path globalPath; // 全局路径
 
-    Eigen::Affine3f transPointAssociateToMap;
-    Eigen::Affine3f incrementalOdometryAffineFront;
-    Eigen::Affine3f incrementalOdometryAffineBack;
+    // 仿射变换矩阵
+    Eigen::Affine3f transPointAssociateToMap;       // 点云到地图的变换
+    Eigen::Affine3f incrementalOdometryAffineFront; // 前向增量里程计变换
+    Eigen::Affine3f incrementalOdometryAffineBack;  // 后向增量里程计变换
 
-    int m_i_num_of_keyframes = 0;
+    int m_i_num_of_keyframes = 0; // 关键帧数量
 
-    /* MOS variables */
+    /* 运动目标分割(MOS)相关变量 */
 
-    // MOS Class
-    AWV_MOS m_awv_mos;
+    AWV_MOS m_awv_mos; // MOS处理类
 
-    // TF
-    Eigen::Affine3f m_tf_scan_initial_to_map;
-    Eigen::Affine3f m_tf_scan_increase_to_map;
-    tf::TransformBroadcaster m_br;
+    // 坐标变换
+    Eigen::Affine3f m_tf_scan_initial_to_map;  // 初始扫描到地图变换
+    Eigen::Affine3f m_tf_scan_increase_to_map; // 增量扫描到地图变换
+    tf::TransformBroadcaster m_br;             // TF广播器
 
-    // Publisher
-    ros::Publisher m_pub_segmented_query_scan_all;
-    ros::Publisher m_pub_segmented_query_scan_static;
-    ros::Publisher m_pub_segmented_query_scan_dynamic;
-    int m_i_current_keyframe_index;
-    int m_i_frame_count = 0;
+    // 发布器
+    ros::Publisher m_pub_segmented_query_scan_all;     // 发布所有分割点云
+    ros::Publisher m_pub_segmented_query_scan_static;  // 发布静态分割点云
+    ros::Publisher m_pub_segmented_query_scan_dynamic; // 发布动态分割点云
+    int m_i_current_keyframe_index;                    // 当前关键帧索引
+    int m_i_frame_count = 0;                           // 帧计数器
 
-    // time
-    double m_d_pose_time_pres_s;
+    // 时间
+    double m_d_pose_time_pres_s; // 位姿时间
 
-    // Pose
-    std::vector<double> m_vec_pres_pose_m_deg;
+    // 位姿
+    std::vector<double> m_vec_pres_pose_m_deg; // 当前位姿
 
-    // loop closure time check
-    bool m_b_loop_closure_done;
+    // 回环检测标志
+    bool m_b_loop_closure_done; // 回环是否完成
 
 public:
-    ros::NodeHandle nh;
+    ros::NodeHandle nh; // ROS节点句柄
 
-    // AWV-MOS params
-    std::string m_cfg_s_output_pc_namespace;
-    float m_cfg_f_static_weight_ratio;
-    bool m_cfg_b_use_prior_mos;
-    bool m_cfg_b_publish_pc;
-    int m_cfg_n_num_cpu_cores;
+    // AWV-MOS参数
+    std::string m_cfg_s_output_pc_namespace; // 输出点云命名空间
+    float m_cfg_f_static_weight_ratio;       // 静态权重比例
+    bool m_cfg_b_use_prior_mos;              // 是否使用先验MOS
+    bool m_cfg_b_publish_pc;                 // 是否发布点云
+    int m_cfg_n_num_cpu_cores;               // CPU核心数
 
-    // // LIO-SAM Params
-    // //Frames
-    std::string lidarFrame;
-    std::string odometryFrame;
-    std::string mapFrame;
+    // LIO-SAM系统参数
+    // 坐标系
+    std::string lidarFrame;    // 激光雷达坐标系
+    std::string odometryFrame; // 里程计坐标系
+    std::string mapFrame;      // 地图坐标系
 
-    // Lidar Sensor Configuration
-    int N_SCAN;
-    int Horizon_SCAN;
+    // 激光雷达配置
+    int N_SCAN;       // 扫描线数
+    int Horizon_SCAN; // 水平分辨率
 
-    // IMU
-    float imuRPYWeight;
+    // IMU参数
+    float imuRPYWeight; // IMU姿态权重
 
-    // LOAM
-    int edgeFeatureMinValidNum;
-    int surfFeatureMinValidNum;
+    // LOAM特征提取参数
+    int edgeFeatureMinValidNum; // 最小有效边缘特征数
+    int surfFeatureMinValidNum; // 最小有效平面特征数
 
-    // voxel filter paprams
-    float mappingCornerLeafSize;
-    float mappingSurfLeafSize ;
+    // 体素滤波参数
+    float mappingCornerLeafSize; // 角点特征叶子大小
+    float mappingSurfLeafSize;   // 平面特征叶子大小
 
-    float z_tollerance; 
-    float rotation_tollerance;
+    float z_tollerance;        // Z轴容差
+    float rotation_tollerance; // 旋转容差
 
-    // Surrounding map
-    float surroundingKeyframeSearchRadius;
-    int surroundingKeyframeMaxNum;
+    // 周围地图参数
+    float surroundingKeyframeSearchRadius; // 周围关键帧搜索半径
+    int surroundingKeyframeMaxNum;         // 最大周围关键帧数量
 
     mapOptimization()
     {
@@ -272,7 +275,7 @@ public:
         nh.param<bool>("awv_mos/m_cfg_b_use_prior_mos", m_cfg_b_use_prior_mos, -1);
         nh.param<bool>("awv_mos/m_cfg_b_publish_pc", m_cfg_b_publish_pc, -1);
         nh.param<int>("awv_mos/m_cfg_n_num_cpu_cores", m_cfg_n_num_cpu_cores, -1);
-        if(m_cfg_n_num_cpu_cores <= 0)
+        if (m_cfg_n_num_cpu_cores <= 0)
             m_cfg_n_num_cpu_cores = std::thread::hardware_concurrency();
 
         // LIO-SAM params
@@ -295,21 +298,21 @@ public:
         parameters.relinearizeThreshold = 0.1;
         parameters.relinearizeSkip = 1;
 
-        pubKeyPoses                 = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/trajectory", 1);
-        m_pubSrroundKeyPoses        = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/surround_key_poses", 1);
-        pubLaserCloudSurround       = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_global", 1);
-        pubLaserOdometryGlobal      = nh.advertise<nav_msgs::Odometry> ("lio_sam/mapping/odometry", 1);
-        pubLaserOdometryIncremental = nh.advertise<nav_msgs::Odometry> ("lio_sam/mapping/odometry_incremental", 1);
-        pubLaserOdometryInitial      = nh.advertise<nav_msgs::Odometry> ("lio_sam/mapping/odometry_initial", 1);
-        pubPath                     = nh.advertise<nav_msgs::Path>("lio_sam/mapping/path", 1);
+        pubKeyPoses = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/trajectory", 1);
+        m_pubSrroundKeyPoses = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/surround_key_poses", 1);
+        pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_global", 1);
+        pubLaserOdometryGlobal = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry", 1);
+        pubLaserOdometryIncremental = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry_incremental", 1);
+        pubLaserOdometryInitial = nh.advertise<nav_msgs::Odometry>("lio_sam/mapping/odometry_initial", 1);
+        pubPath = nh.advertise<nav_msgs::Path>("lio_sam/mapping/path", 1);
 
         subCloud = nh.subscribe<awv_mos_lio::cloud_info>("lio_sam/feature/cloud_info", 100, &mapOptimization::laserCloudInfoHandler, this, ros::TransportHints().tcpNoDelay());
 
-        pubRecentKeyFrames    = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_local", 1);
-        pubRecentKeyFrame     = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
+        pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_local", 1);
+        pubRecentKeyFrame = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
         pubCloudRegisteredRaw = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered_raw", 1);
 
-        pubSLAMInfo           = nh.advertise<awv_mos_lio::cloud_info>("lio_sam/mapping/slam_info", 1);
+        pubSLAMInfo = nh.advertise<awv_mos_lio::cloud_info>("lio_sam/mapping/slam_info", 1);
 
         downSizeFilterCorner.setLeafSize(mappingCornerLeafSize, mappingCornerLeafSize, mappingCornerLeafSize);
         downSizeFilterSurf.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
@@ -330,7 +333,8 @@ public:
     }
 
     ~mapOptimization()
-    {}
+    {
+    }
 
     void allocateMemory()
     {
@@ -338,11 +342,10 @@ public:
         m_surroundingKeyPoses.reset(new pcl::PointCloud<PointType>());
         cloudKeyPoses6D.reset(new pcl::PointCloud<PointTypePose>());
 
-
-        laserCloudCornerLast.reset(new pcl::PointCloud<PointTypeMOS>()); // corner feature set from odoOptimization
-        laserCloudSurfLast.reset(new pcl::PointCloud<PointTypeMOS>()); // surf feature set from odoOptimization
+        laserCloudCornerLast.reset(new pcl::PointCloud<PointTypeMOS>());   // corner feature set from odoOptimization
+        laserCloudSurfLast.reset(new pcl::PointCloud<PointTypeMOS>());     // surf feature set from odoOptimization
         laserCloudCornerLastDS.reset(new pcl::PointCloud<PointTypeMOS>()); // downsampled corner featuer set from odoOptimization
-        laserCloudSurfLastDS.reset(new pcl::PointCloud<PointTypeMOS>()); // downsampled surf featuer set from odoOptimization
+        laserCloudSurfLastDS.reset(new pcl::PointCloud<PointTypeMOS>());   // downsampled surf featuer set from odoOptimization
         m_pres_scanframe.reset(new pcl::PointCloud<PointTypeMOS>());
 
         laserCloudOri.reset(new pcl::PointCloud<PointType>());
@@ -366,14 +369,15 @@ public:
         kdtreeCornerFromMap.reset(new pcl::KdTreeFLANN<PointTypeMOS>());
         kdtreeSurfFromMap.reset(new pcl::KdTreeFLANN<PointTypeMOS>());
 
-        for (int i = 0; i < 6; ++i){
+        for (int i = 0; i < 6; ++i)
+        {
             transformTobeMapped[i] = 0;
         }
 
         matP = cv::Mat(6, 6, CV_32F, cv::Scalar::all(0));
     }
 
-    void laserCloudInfoHandler(const awv_mos_lio::cloud_infoConstPtr& msgIn)
+    void laserCloudInfoHandler(const awv_mos_lio::cloud_infoConstPtr &msgIn)
     {
         m_mutexInputPointCloud.lock();
         m_vec_cloud_info_queue.push_front(*msgIn);
@@ -381,16 +385,16 @@ public:
         return;
     }
 
-    void pointAssociateToMap(PointType const * const pi, PointType * const po)
+    void pointAssociateToMap(PointType const *const pi, PointType *const po)
     {
         *po = *pi;
-        po->x = transPointAssociateToMap(0,0) * pi->x + transPointAssociateToMap(0,1) * pi->y + transPointAssociateToMap(0,2) * pi->z + transPointAssociateToMap(0,3);
-        po->y = transPointAssociateToMap(1,0) * pi->x + transPointAssociateToMap(1,1) * pi->y + transPointAssociateToMap(1,2) * pi->z + transPointAssociateToMap(1,3);
-        po->z = transPointAssociateToMap(2,0) * pi->x + transPointAssociateToMap(2,1) * pi->y + transPointAssociateToMap(2,2) * pi->z + transPointAssociateToMap(2,3);
+        po->x = transPointAssociateToMap(0, 0) * pi->x + transPointAssociateToMap(0, 1) * pi->y + transPointAssociateToMap(0, 2) * pi->z + transPointAssociateToMap(0, 3);
+        po->y = transPointAssociateToMap(1, 0) * pi->x + transPointAssociateToMap(1, 1) * pi->y + transPointAssociateToMap(1, 2) * pi->z + transPointAssociateToMap(1, 3);
+        po->z = transPointAssociateToMap(2, 0) * pi->x + transPointAssociateToMap(2, 1) * pi->y + transPointAssociateToMap(2, 2) * pi->z + transPointAssociateToMap(2, 3);
         return;
     }
 
-    pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn, PointTypePose* transformIn)
+    pcl::PointCloud<PointType>::Ptr transformPointCloud(pcl::PointCloud<PointType>::Ptr cloudIn, PointTypePose *transformIn)
     {
         pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
 
@@ -398,19 +402,19 @@ public:
         cloudOut->resize(cloudSize);
 
         Eigen::Affine3f transCur = pcl::getTransformation(transformIn->x, transformIn->y, transformIn->z, transformIn->roll, transformIn->pitch, transformIn->yaw);
-        
+
         for (int i = 0; i < cloudSize; ++i)
         {
             const auto &pointFrom = cloudIn->points[i];
             cloudOut->points[i] = pointFrom;
-            cloudOut->points[i].x = transCur(0,0) * pointFrom.x + transCur(0,1) * pointFrom.y + transCur(0,2) * pointFrom.z + transCur(0,3);
-            cloudOut->points[i].y = transCur(1,0) * pointFrom.x + transCur(1,1) * pointFrom.y + transCur(1,2) * pointFrom.z + transCur(1,3);
-            cloudOut->points[i].z = transCur(2,0) * pointFrom.x + transCur(2,1) * pointFrom.y + transCur(2,2) * pointFrom.z + transCur(2,3);
+            cloudOut->points[i].x = transCur(0, 0) * pointFrom.x + transCur(0, 1) * pointFrom.y + transCur(0, 2) * pointFrom.z + transCur(0, 3);
+            cloudOut->points[i].y = transCur(1, 0) * pointFrom.x + transCur(1, 1) * pointFrom.y + transCur(1, 2) * pointFrom.z + transCur(1, 3);
+            cloudOut->points[i].z = transCur(2, 0) * pointFrom.x + transCur(2, 1) * pointFrom.y + transCur(2, 2) * pointFrom.z + transCur(2, 3);
         }
         return cloudOut;
     }
-    
-    pcl::PointCloud<PointTypeMOS>::Ptr transformPointCloudMOS(pcl::PointCloud<PointTypeMOS>::Ptr cloudIn, PointTypePose* transformIn)
+
+    pcl::PointCloud<PointTypeMOS>::Ptr transformPointCloudMOS(pcl::PointCloud<PointTypeMOS>::Ptr cloudIn, PointTypePose *transformIn)
     {
         pcl::PointCloud<PointTypeMOS>::Ptr cloudOut(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
 
@@ -418,14 +422,14 @@ public:
         cloudOut->resize(cloudSize);
 
         Eigen::Affine3f transCur = pcl::getTransformation(transformIn->x, transformIn->y, transformIn->z, transformIn->roll, transformIn->pitch, transformIn->yaw);
-        
+
         for (int i = 0; i < cloudSize; ++i)
         {
             const auto &pointFrom = cloudIn->points[i];
             cloudOut->points[i] = pointFrom;
-            cloudOut->points[i].x = transCur(0,0) * pointFrom.x + transCur(0,1) * pointFrom.y + transCur(0,2) * pointFrom.z + transCur(0,3);
-            cloudOut->points[i].y = transCur(1,0) * pointFrom.x + transCur(1,1) * pointFrom.y + transCur(1,2) * pointFrom.z + transCur(1,3);
-            cloudOut->points[i].z = transCur(2,0) * pointFrom.x + transCur(2,1) * pointFrom.y + transCur(2,2) * pointFrom.z + transCur(2,3);
+            cloudOut->points[i].x = transCur(0, 0) * pointFrom.x + transCur(0, 1) * pointFrom.y + transCur(0, 2) * pointFrom.z + transCur(0, 3);
+            cloudOut->points[i].y = transCur(1, 0) * pointFrom.x + transCur(1, 1) * pointFrom.y + transCur(1, 2) * pointFrom.z + transCur(1, 3);
+            cloudOut->points[i].z = transCur(2, 0) * pointFrom.x + transCur(2, 1) * pointFrom.y + transCur(2, 2) * pointFrom.z + transCur(2, 3);
         }
         return cloudOut;
     }
@@ -433,17 +437,17 @@ public:
     gtsam::Pose3 pclPointTogtsamPose3(PointTypePose thisPoint)
     {
         return gtsam::Pose3(gtsam::Rot3::RzRyRx(double(thisPoint.roll), double(thisPoint.pitch), double(thisPoint.yaw)),
-                                  gtsam::Point3(double(thisPoint.x),    double(thisPoint.y),     double(thisPoint.z)));
+                            gtsam::Point3(double(thisPoint.x), double(thisPoint.y), double(thisPoint.z)));
     }
 
     gtsam::Pose3 trans2gtsamPose(float transformIn[])
     {
-        return gtsam::Pose3(gtsam::Rot3::RzRyRx(transformIn[0], transformIn[1], transformIn[2]), 
-                                  gtsam::Point3(transformIn[3], transformIn[4], transformIn[5]));
+        return gtsam::Pose3(gtsam::Rot3::RzRyRx(transformIn[0], transformIn[1], transformIn[2]),
+                            gtsam::Point3(transformIn[3], transformIn[4], transformIn[5]));
     }
 
     Eigen::Affine3f pclPointToAffine3f(PointTypePose thisPoint)
-    { 
+    {
         return pcl::getTransformation(thisPoint.x, thisPoint.y, thisPoint.z, thisPoint.roll, thisPoint.pitch, thisPoint.yaw);
     }
 
@@ -458,56 +462,65 @@ public:
         thisPose6D.x = transformIn[3];
         thisPose6D.y = transformIn[4];
         thisPose6D.z = transformIn[5];
-        thisPose6D.roll  = transformIn[0];
+        thisPose6D.roll = transformIn[0];
         thisPose6D.pitch = transformIn[1];
-        thisPose6D.yaw   = transformIn[2];
+        thisPose6D.yaw = transformIn[2];
         return thisPose6D;
     }
 
-/* --------------------- Graph Optimization Functions */
+    /* --------------------- Graph Optimization Functions */
     void updateInitialGuess()
     {
-        // save current transformation before any processing
+        // 保存当前变换作为前一帧的里程计变换
         incrementalOdometryAffineFront = trans2Affine3f(transformTobeMapped);
 
         static Eigen::Affine3f lastImuTransformation;
-        // initialization
+        // 初始化处理
         if (cloudKeyPoses3D->points.empty())
         {
+            // 如果是第一帧,使用IMU的roll和pitch初始化,yaw设为0
             transformTobeMapped[0] = cloudInfo.imuRollInit;
             transformTobeMapped[1] = cloudInfo.imuPitchInit;
             transformTobeMapped[2] = 0;
 
-            lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit); // save imu before return;
+            // 保存当前IMU变换
+            lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit);
             return;
         }
 
-        // use imu pre-integration estimation for pose guess
+        // 使用IMU预积分估计位姿
         static bool lastImuPreTransAvailable = false;
         static Eigen::Affine3f lastImuPreTransformation;
         if (cloudInfo.odomAvailable == true)
         {
-            Eigen::Affine3f transBack = pcl::getTransformation(cloudInfo.initialGuessX,    cloudInfo.initialGuessY,     cloudInfo.initialGuessZ, 
+            // 获取里程计初始猜测的变换矩阵
+            Eigen::Affine3f transBack = pcl::getTransformation(cloudInfo.initialGuessX, cloudInfo.initialGuessY, cloudInfo.initialGuessZ,
                                                                cloudInfo.initialGuessRoll, cloudInfo.initialGuessPitch, cloudInfo.initialGuessYaw);
             if (lastImuPreTransAvailable == false)
             {
+                // 第一次使用里程计,直接保存变换
                 lastImuPreTransformation = transBack;
                 lastImuPreTransAvailable = true;
-            } else {
+            }
+            else
+            {
+                // 计算相对于上一帧的增量变换
                 Eigen::Affine3f transIncre = lastImuPreTransformation.inverse() * transBack;
                 Eigen::Affine3f transTobe = trans2Affine3f(transformTobeMapped);
                 Eigen::Affine3f transTobeIncre = trans2Affine3f(transformincremental);
+                // 计算最终变换
                 Eigen::Affine3f transFinal = transTobe * transIncre;
-                // Eigen::Affine3f transFinalIncre = transTobeIncre * transIncre;
                 m_tf_scan_initial_to_map = transTobeIncre * transIncre;
-                pcl::getTranslationAndEulerAngles(transFinal, transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-                                                              transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
-                pcl::getTranslationAndEulerAngles(m_tf_scan_initial_to_map, transformincrementalinitial[3], transformincrementalinitial[4], transformincrementalinitial[5], 
-                                                                    transformincrementalinitial[0], transformincrementalinitial[1], transformincrementalinitial[2]);
 
+                // 从变换矩阵中提取平移和欧拉角
+                pcl::getTranslationAndEulerAngles(transFinal, transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5],
+                                                  transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+                pcl::getTranslationAndEulerAngles(m_tf_scan_initial_to_map, transformincrementalinitial[3], transformincrementalinitial[4], transformincrementalinitial[5],
+                                                  transformincrementalinitial[0], transformincrementalinitial[1], transformincrementalinitial[2]);
+
+                // 更新上一帧变换
                 lastImuPreTransformation = transBack;
-
-                lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit); // save imu before return;
+                lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit);
                 return;
             }
         }
@@ -516,23 +529,28 @@ public:
             std::cout << "[updateInitialGuess] cloudInfo.odomAvailable = false\n";
         }
 
-        // use imu incremental estimation for pose guess (only rotation)
+        // 如果里程计不可用,使用IMU增量估计位姿(仅旋转)
         if (cloudInfo.imuAvailable == true)
         {
+            // 获取IMU变换矩阵
             Eigen::Affine3f transBack = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit);
+            // 计算相对于上一帧的增量变换
             Eigen::Affine3f transIncre = lastImuTransformation.inverse() * transBack;
 
             Eigen::Affine3f transTobe = trans2Affine3f(transformTobeMapped);
             Eigen::Affine3f transTobeIncre = trans2Affine3f(transformincremental);
+            // 计算最终变换
             Eigen::Affine3f transFinal = transTobe * transIncre;
-            // Eigen::Affine3f transFinalIncre = transTobeIncre * transIncre;
             m_tf_scan_initial_to_map = transTobeIncre * transIncre;
-            pcl::getTranslationAndEulerAngles(transFinal, transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-                                                          transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
-            pcl::getTranslationAndEulerAngles(m_tf_scan_initial_to_map, transformincrementalinitial[3], transformincrementalinitial[4], transformincrementalinitial[5], 
-                                                                transformincrementalinitial[0], transformincrementalinitial[1], transformincrementalinitial[2]);
 
-            lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit); // save imu before return;
+            // 从变换矩阵中提取平移和欧拉角
+            pcl::getTranslationAndEulerAngles(transFinal, transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5],
+                                              transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+            pcl::getTranslationAndEulerAngles(m_tf_scan_initial_to_map, transformincrementalinitial[3], transformincrementalinitial[4], transformincrementalinitial[5],
+                                              transformincrementalinitial[0], transformincrementalinitial[1], transformincrementalinitial[2]);
+
+            // 更新上一帧IMU变换
+            lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imuRollInit, cloudInfo.imuPitchInit, cloudInfo.imuYawInit);
             return;
         }
         else
@@ -546,7 +564,7 @@ public:
     void extractSurroundingKeyFrames()
     {
         if (cloudKeyPoses3D->points.empty() == true)
-            return; 
+            return;
 
         extractSequential();
 
@@ -555,32 +573,44 @@ public:
 
     void extractSequential()
     {
-        // pcl::PointCloud<PointType>::Ptr surroundingKeyPoses(new pcl::PointCloud<PointType>());
-
+        // 这个函数用于提取当前帧周围的关键帧
+        // 使用静态变量记录上一次处理的关键帧索引
         static int prev_recent_idx = -1;
-        if(prev_recent_idx != cloudKeyPoses3D->points.back().intensity)
+
+        // 只有当最新关键帧改变时才进行处理
+        if (prev_recent_idx != cloudKeyPoses3D->points.back().intensity)
         {
+            // 清空周围关键帧点云
             m_surroundingKeyPoses->clear();
+            // 添加最新的关键帧
             m_surroundingKeyPoses->points.push_back(cloudKeyPoses3D->points.back());
+            // 记录前一个关键帧位姿,初始为最新关键帧
             PointType prev_pose = cloudKeyPoses3D->points.back();
+            // 记录关键帧之间的累计距离
             double keyframe_1d_odometry_m = 0;
 
-            for(int idx = cloudKeyPoses3D->points.size() - 2; idx >= 0; idx--)
+            // 从后向前遍历所有关键帧
+            for (int idx = cloudKeyPoses3D->points.size() - 2; idx >= 0; idx--)
             {
-                double odometry_m = sqrt((cloudKeyPoses3D->points[idx].x - prev_pose.x) * (cloudKeyPoses3D->points[idx].x - prev_pose.x)
-                                        + (cloudKeyPoses3D->points[idx].y - prev_pose.y) * (cloudKeyPoses3D->points[idx].y - prev_pose.y)
-                                        + (cloudKeyPoses3D->points[idx].z - prev_pose.z) * (cloudKeyPoses3D->points[idx].z - prev_pose.z));
+                // 计算当前关键帧与前一个关键帧之间的欧氏距离
+                double odometry_m = sqrt((cloudKeyPoses3D->points[idx].x - prev_pose.x) * (cloudKeyPoses3D->points[idx].x - prev_pose.x) + (cloudKeyPoses3D->points[idx].y - prev_pose.y) * (cloudKeyPoses3D->points[idx].y - prev_pose.y) + (cloudKeyPoses3D->points[idx].z - prev_pose.z) * (cloudKeyPoses3D->points[idx].z - prev_pose.z));
+                // 累加距离
                 keyframe_1d_odometry_m += odometry_m;
+                // 更新前一个关键帧位姿
                 prev_pose = cloudKeyPoses3D->points[idx];
 
-                if(keyframe_1d_odometry_m > surroundingKeyframeSearchRadius || m_surroundingKeyPoses->points.size() >= surroundingKeyframeMaxNum)
+                // 如果累计距离超过搜索半径或关键帧数量超过最大值,则停止搜索
+                if (keyframe_1d_odometry_m > surroundingKeyframeSearchRadius || m_surroundingKeyPoses->points.size() >= surroundingKeyframeMaxNum)
                     break;
 
+                // 添加当前关键帧到周围关键帧点云中
                 m_surroundingKeyPoses->points.push_back(cloudKeyPoses3D->points[idx]);
             }
 
+            // 提取周围关键帧对应的特征点云
             extractCloud(m_surroundingKeyPoses);
-            
+
+            // 更新上一次处理的关键帧索引
             prev_recent_idx = cloudKeyPoses3D->points.back().intensity;
         }
 
@@ -591,24 +621,26 @@ public:
     {
         // fuse the map
         laserCloudCornerFromMap->clear();
-        laserCloudSurfFromMap->clear(); 
+        laserCloudSurfFromMap->clear();
         for (int i = 0; i < (int)cloudToExtract->size(); ++i)
         {
             if (pointDistance(cloudToExtract->points[i], cloudKeyPoses3D->back()) > surroundingKeyframeSearchRadius)
                 continue;
 
             int thisKeyInd = (int)cloudToExtract->points[i].intensity;
-            if (laserCloudMapContainer.find(thisKeyInd) != laserCloudMapContainer.end()) 
+            if (laserCloudMapContainer.find(thisKeyInd) != laserCloudMapContainer.end())
             {
                 // transformed cloud available
                 *laserCloudCornerFromMap += laserCloudMapContainer[thisKeyInd].first;
-                *laserCloudSurfFromMap   += laserCloudMapContainer[thisKeyInd].second;
-            } else {
+                *laserCloudSurfFromMap += laserCloudMapContainer[thisKeyInd].second;
+            }
+            else
+            {
                 // transformed cloud not available
-                pcl::PointCloud<PointTypeMOS> laserCloudCornerTemp = *transformPointCloudMOS(cornerCloudKeyFrames[thisKeyInd],  &cloudKeyPoses6D->points[thisKeyInd]);
-                pcl::PointCloud<PointTypeMOS> laserCloudSurfTemp = *transformPointCloudMOS(surfCloudKeyFrames[thisKeyInd],    &cloudKeyPoses6D->points[thisKeyInd]);
+                pcl::PointCloud<PointTypeMOS> laserCloudCornerTemp = *transformPointCloudMOS(cornerCloudKeyFrames[thisKeyInd], &cloudKeyPoses6D->points[thisKeyInd]);
+                pcl::PointCloud<PointTypeMOS> laserCloudSurfTemp = *transformPointCloudMOS(surfCloudKeyFrames[thisKeyInd], &cloudKeyPoses6D->points[thisKeyInd]);
                 *laserCloudCornerFromMap += laserCloudCornerTemp;
-                *laserCloudSurfFromMap   += laserCloudSurfTemp;
+                *laserCloudSurfFromMap += laserCloudSurfTemp;
                 laserCloudMapContainer[thisKeyInd] = make_pair(laserCloudCornerTemp, laserCloudSurfTemp);
             }
         }
@@ -630,7 +662,7 @@ public:
 
         return;
     }
-    
+
     void downsampleCurrentScan()
     {
         // Downsample cloud from current scan
@@ -656,10 +688,9 @@ public:
     void cornerOptimization()
     {
         updatePointAssociateToMap();
-		
-        tbb::parallel_for
-        (
-            size_t(0), (size_t) laserCloudCornerLastDSNum, [&](size_t i) 
+
+        tbb::parallel_for(
+            size_t(0), (size_t)laserCloudCornerLastDSNum, [&](size_t i)
             {                	
                 PointType pointOri, pointSel;
                 PointType coeff;
@@ -754,9 +785,7 @@ public:
                             laserCloudOriCornerFlag[i] = true;
                         }
                     }
-                }
-            }
-        );
+                } });
         return;
     }
 
@@ -764,10 +793,8 @@ public:
     {
         updatePointAssociateToMap();
 
-
-        tbb::parallel_for
-        (
-            size_t(0), (size_t) laserCloudSurfLastDSNum, [&](size_t i) 
+        tbb::parallel_for(
+            size_t(0), (size_t)laserCloudSurfLastDSNum, [&](size_t i)
             {       
                 PointType pointOri, pointSel;
                 PointType coeff;
@@ -841,24 +868,26 @@ public:
                             laserCloudOriSurfFlag[i] = true;
                         }
                     }
-                }
-            }
-        );
+                } });
         return;
     }
 
     void combineOptimizationCoeffs()
     {
         // combine corner coeffs
-        for (int i = 0; i < laserCloudCornerLastDSNum; ++i){
-            if (laserCloudOriCornerFlag[i] == true){
+        for (int i = 0; i < laserCloudCornerLastDSNum; ++i)
+        {
+            if (laserCloudOriCornerFlag[i] == true)
+            {
                 laserCloudOri->push_back(laserCloudOriCornerVec[i]);
                 coeffSel->push_back(coeffSelCornerVec[i]);
             }
         }
         // combine surf coeffs
-        for (int i = 0; i < laserCloudSurfLastDSNum; ++i){
-            if (laserCloudOriSurfFlag[i] == true){
+        for (int i = 0; i < laserCloudSurfLastDSNum; ++i)
+        {
+            if (laserCloudOriSurfFlag[i] == true)
+            {
                 laserCloudOri->push_back(laserCloudOriSurfVec[i]);
                 coeffSel->push_back(coeffSelSurfVec[i]);
             }
@@ -889,7 +918,8 @@ public:
         float crz = cos(transformTobeMapped[0]);
 
         int laserCloudSelNum = laserCloudOri->size();
-        if (laserCloudSelNum < 50) {
+        if (laserCloudSelNum < 50)
+        {
             return false;
         }
 
@@ -902,7 +932,8 @@ public:
 
         PointType pointOri, coeff;
 
-        for (int i = 0; i < laserCloudSelNum; i++) {
+        for (int i = 0; i < laserCloudSelNum; i++)
+        {
             // lidar -> camera
             pointOri.x = laserCloudOri->points[i].y;
             pointOri.y = laserCloudOri->points[i].z;
@@ -913,18 +944,11 @@ public:
             coeff.z = coeffSel->points[i].x;
             coeff.intensity = coeffSel->points[i].intensity;
             // in camera
-            float arx = (crx*sry*srz*pointOri.x + crx*crz*sry*pointOri.y - srx*sry*pointOri.z) * coeff.x
-                      + (-srx*srz*pointOri.x - crz*srx*pointOri.y - crx*pointOri.z) * coeff.y
-                      + (crx*cry*srz*pointOri.x + crx*cry*crz*pointOri.y - cry*srx*pointOri.z) * coeff.z;
+            float arx = (crx * sry * srz * pointOri.x + crx * crz * sry * pointOri.y - srx * sry * pointOri.z) * coeff.x + (-srx * srz * pointOri.x - crz * srx * pointOri.y - crx * pointOri.z) * coeff.y + (crx * cry * srz * pointOri.x + crx * cry * crz * pointOri.y - cry * srx * pointOri.z) * coeff.z;
 
-            float ary = ((cry*srx*srz - crz*sry)*pointOri.x 
-                      + (sry*srz + cry*crz*srx)*pointOri.y + crx*cry*pointOri.z) * coeff.x
-                      + ((-cry*crz - srx*sry*srz)*pointOri.x 
-                      + (cry*srz - crz*srx*sry)*pointOri.y - crx*sry*pointOri.z) * coeff.z;
+            float ary = ((cry * srx * srz - crz * sry) * pointOri.x + (sry * srz + cry * crz * srx) * pointOri.y + crx * cry * pointOri.z) * coeff.x + ((-cry * crz - srx * sry * srz) * pointOri.x + (cry * srz - crz * srx * sry) * pointOri.y - crx * sry * pointOri.z) * coeff.z;
 
-            float arz = ((crz*srx*sry - cry*srz)*pointOri.x + (-cry*crz-srx*sry*srz)*pointOri.y)*coeff.x
-                      + (crx*crz*pointOri.x - crx*srz*pointOri.y) * coeff.y
-                      + ((sry*srz + cry*crz*srx)*pointOri.x + (crz*sry-cry*srx*srz)*pointOri.y)*coeff.z;
+            float arz = ((crz * srx * sry - cry * srz) * pointOri.x + (-cry * crz - srx * sry * srz) * pointOri.y) * coeff.x + (crx * crz * pointOri.x - crx * srz * pointOri.y) * coeff.y + ((sry * srz + cry * crz * srx) * pointOri.x + (crz * sry - cry * srx * srz) * pointOri.y) * coeff.z;
             // camera -> lidar
             matA.at<float>(i, 0) = arz;
             matA.at<float>(i, 1) = arx;
@@ -940,7 +964,8 @@ public:
         matAtB = matAt * matB;
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
 
-        if (iterCount == 0) {
+        if (iterCount == 0)
+        {
 
             cv::Mat matE(1, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(6, 6, CV_32F, cv::Scalar::all(0));
@@ -951,13 +976,18 @@ public:
 
             isDegenerate = false;
             float eignThre[6] = {100, 100, 100, 100, 100, 100};
-            for (int i = 5; i >= 0; i--) {
-                if (matE.at<float>(0, i) < eignThre[i]) {
-                    for (int j = 0; j < 6; j++) {
+            for (int i = 5; i >= 0; i--)
+            {
+                if (matE.at<float>(0, i) < eignThre[i])
+                {
+                    for (int j = 0; j < 6; j++)
+                    {
                         matV2.at<float>(i, j) = 0;
                     }
                     isDegenerate = true;
-                } else {
+                }
+                else
+                {
                     break;
                 }
             }
@@ -979,15 +1009,16 @@ public:
         transformTobeMapped[5] += matX.at<float>(5, 0);
 
         float deltaR = sqrt(
-                            pow(pcl::rad2deg(matX.at<float>(0, 0)), 2) +
-                            pow(pcl::rad2deg(matX.at<float>(1, 0)), 2) +
-                            pow(pcl::rad2deg(matX.at<float>(2, 0)), 2));
+            pow(pcl::rad2deg(matX.at<float>(0, 0)), 2) +
+            pow(pcl::rad2deg(matX.at<float>(1, 0)), 2) +
+            pow(pcl::rad2deg(matX.at<float>(2, 0)), 2));
         float deltaT = sqrt(
-                            pow(matX.at<float>(3, 0) * 100, 2) +
-                            pow(matX.at<float>(4, 0) * 100, 2) +
-                            pow(matX.at<float>(5, 0) * 100, 2));
+            pow(matX.at<float>(3, 0) * 100, 2) +
+            pow(matX.at<float>(4, 0) * 100, 2) +
+            pow(matX.at<float>(5, 0) * 100, 2));
 
-        if (deltaR < 0.05 && deltaT < 0.05) {
+        if (deltaR < 0.05 && deltaT < 0.05)
+        {
             return true; // converged
         }
         return false; // keep optimizing
@@ -1020,16 +1051,17 @@ public:
                     break;
                 }
 
-                if(iterCount >= 29)
+                if (iterCount >= 29)
                 {
                     divergence_count++;
                     std::cout << "\033[1;31m iterCount: " << iterCount << ", Divergence count: " << divergence_count << "\033[0m\n";
                 }
-
             }
 
             transformUpdate();
-        } else {
+        }
+        else
+        {
             ROS_WARN("Not enough features! Only %d edge and %d planar features available.", laserCloudCornerLastDSNum, laserCloudSurfLastDSNum);
         }
 
@@ -1082,15 +1114,15 @@ public:
 
     bool saveKeyFramesAndFactor()
     {
-        Eigen::Affine3f pres_tf_scan_to_map = pcl::getTransformation(transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-                                                            transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+        Eigen::Affine3f pres_tf_scan_to_map = pcl::getTransformation(transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5],
+                                                                     transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
         if (m_awv_mos.KeyframeSelection(pres_tf_scan_to_map, timeLaserInfoCur) == false)
             return false;
 
         // if(cloudInfo.odomAvailable == false)
         //     return false;
 
-        //save key poses
+        // save key poses
         PointType thisPose3D;
         PointTypePose thisPose6D;
 
@@ -1105,9 +1137,9 @@ public:
         thisPose6D.y = thisPose3D.y;
         thisPose6D.z = thisPose3D.z;
         thisPose6D.intensity = m_i_current_keyframe_index; // this can be used as index
-        thisPose6D.roll  = transformTobeMapped[0];
+        thisPose6D.roll = transformTobeMapped[0];
         thisPose6D.pitch = transformTobeMapped[1];
-        thisPose6D.yaw   = transformTobeMapped[2];
+        thisPose6D.yaw = transformTobeMapped[2];
         thisPose6D.time = timeLaserInfoCur;
         cloudKeyPoses6D->push_back(thisPose6D);
 
@@ -1117,7 +1149,7 @@ public:
         return true;
     }
 
-    void updatePath(const PointTypePose& pose_in)
+    void updatePath(const PointTypePose &pose_in)
     {
         geometry_msgs::PoseStamped pose_stamped;
         pose_stamped.header.stamp = ros::Time().fromSec(pose_in.time);
@@ -1146,7 +1178,7 @@ public:
         laserOdometryROS.pose.pose.position.x = transformTobeMapped[3];
         laserOdometryROS.pose.pose.position.y = transformTobeMapped[4];
         laserOdometryROS.pose.pose.position.z = transformTobeMapped[5];
-        laserOdometryROS.pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);       
+        laserOdometryROS.pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
         pubLaserOdometryGlobal.publish(laserOdometryROS);
 
         nav_msgs::Odometry initial_pose_msg;
@@ -1162,14 +1194,14 @@ public:
         // Publish odometry for ROS (incremental)
         static bool lastIncreOdomPubFlag = false;
         static nav_msgs::Odometry laserOdomIncremental; // incremental odometry msg
-        static Eigen::Affine3f increOdomAffine; // incremental odometry in affine
+        static Eigen::Affine3f increOdomAffine;         // incremental odometry in affine
         if (lastIncreOdomPubFlag == false)
         {
             lastIncreOdomPubFlag = true;
             laserOdomIncremental = laserOdometryROS;
             increOdomAffine = trans2Affine3f(transformTobeMapped);
             float x, y, z, roll, pitch, yaw;
-            pcl::getTranslationAndEulerAngles (increOdomAffine, x, y, z, roll, pitch, yaw);
+            pcl::getTranslationAndEulerAngles(increOdomAffine, x, y, z, roll, pitch, yaw);
             transformincremental[0] = roll;
             transformincremental[1] = pitch;
             transformincremental[2] = yaw;
@@ -1177,12 +1209,13 @@ public:
             transformincremental[4] = y;
             transformincremental[5] = z;
             m_tf_scan_increase_to_map = increOdomAffine;
-        } 
-        else {
+        }
+        else
+        {
             Eigen::Affine3f affineIncre = incrementalOdometryAffineFront.inverse() * incrementalOdometryAffineBack;
             increOdomAffine = increOdomAffine * affineIncre;
             float x, y, z, roll, pitch, yaw;
-            pcl::getTranslationAndEulerAngles (increOdomAffine, x, y, z, roll, pitch, yaw);
+            pcl::getTranslationAndEulerAngles(increOdomAffine, x, y, z, roll, pitch, yaw);
             transformincremental[0] = roll;
             transformincremental[1] = pitch;
             transformincremental[2] = yaw;
@@ -1254,24 +1287,23 @@ public:
             *surrounding_keyframes_combine += *laserCloudCornerFromMapDS;
             publishCloud(pubRecentKeyFrames, surrounding_keyframes_combine, timeLaserInfoStamp, odometryFrame);
         }
-        
+
         // publish registered key frame
         if (pubRecentKeyFrame.getNumSubscribers() != 0)
         {
             pcl::PointCloud<PointTypeMOS>::Ptr cloudOut(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
             PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
-            for(auto& point: laserCloudCornerLastDS->points)
+            for (auto &point : laserCloudCornerLastDS->points)
             {
                 point.intensity = 1;
             }
-            for(auto& point: laserCloudSurfLastDS->points)
+            for (auto &point : laserCloudSurfLastDS->points)
             {
                 point.intensity = 0;
             }
-            *cloudOut += *transformPointCloudMOS(laserCloudCornerLastDS,  &thisPose6D);
-            *cloudOut += *transformPointCloudMOS(laserCloudSurfLastDS,    &thisPose6D);
+            *cloudOut += *transformPointCloudMOS(laserCloudCornerLastDS, &thisPose6D);
+            *cloudOut += *transformPointCloudMOS(laserCloudSurfLastDS, &thisPose6D);
             publishCloud(pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, odometryFrame);
-            
         }
         // publish registered high-res raw cloud
         if (pubCloudRegisteredRaw.getNumSubscribers() != 0)
@@ -1279,7 +1311,7 @@ public:
             pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
             pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
             PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
-            *cloudOut = *transformPointCloud(cloudOut,  &thisPose6D);
+            *cloudOut = *transformPointCloud(cloudOut, &thisPose6D);
             publishCloud(pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, odometryFrame);
         }
 
@@ -1292,9 +1324,9 @@ public:
         {
             pcl::PointCloud<PointTypeMOS>::Ptr segmented_query_scan_static(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
             pcl::PointCloud<PointTypeMOS>::Ptr segmented_query_scan_dynamic(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-            for (const auto& point : m_pres_segmented_scan->points) 
+            for (const auto &point : m_pres_segmented_scan->points)
             {
-                if(point.r >= point.g || point.b >= point.g) // Filtering non-dynamic points
+                if (point.r >= point.g || point.b >= point.g) // Filtering non-dynamic points
                     segmented_query_scan_static->points.push_back(point);
                 else
                     segmented_query_scan_dynamic->points.push_back(point);
@@ -1339,8 +1371,8 @@ public:
         m_br.sendTransform(tf::StampedTransform(t_odom_to_lidar, timeLaserInfoStamp, odometryFrame, "lidar_link"));
 
         static bool flag_init_tf = false;
-        if(flag_init_tf == false)
-        {          
+        if (flag_init_tf == false)
+        {
             flag_init_tf = true;
 
             // static tf
@@ -1353,17 +1385,16 @@ public:
 
     inline float pointDistance(PointType p)
     {
-        return sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
+        return sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
     }
-
 
     inline float pointDistance(PointType p1, PointType p2)
     {
-        return sqrt((p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y) + (p1.z-p2.z)*(p1.z-p2.z));
+        return sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z));
     }
 
-    template<typename T>
-    sensor_msgs::PointCloud2 publishCloud(const ros::Publisher& thisPub, const T& thisCloud, ros::Time thisStamp, std::string thisFrame)
+    template <typename T>
+    sensor_msgs::PointCloud2 publishCloud(const ros::Publisher &thisPub, const T &thisCloud, ros::Time thisStamp, std::string thisFrame)
     {
         sensor_msgs::PointCloud2 tempCloud;
         pcl::toROSMsg(*thisCloud, tempCloud);
@@ -1376,20 +1407,31 @@ public:
 
     void PriorMovingObjectSegmentation()
     {
-        if(m_cfg_b_use_prior_mos == true && cloudInfo.odomAvailable == true)
+        // 这个函数用于进行先验的运动物体分割
+
+        // 如果启用了先验MOS且里程计可用
+        if (m_cfg_b_use_prior_mos == true && cloudInfo.odomAvailable == true)
         {
-            bool is_keyframe = false;
-            bool is_prior = true;
+            bool is_keyframe = false; // 不是关键帧
+            bool is_prior = true;     // 是先验处理
+
+            // 运行在线MOS,使用初始位姿进行分割
             m_awv_mos.RunOnlineMOS(m_pres_scanframe, m_tf_scan_initial_to_map, m_i_frame_count - 1, timeLaserInfoCur, is_keyframe, is_prior);
+            // 获取分割后的点云
             m_awv_mos.GetSegmentedScan(m_pres_initial_segmented_scan);
 
+            // 清空角点和平面点云
             laserCloudCornerLast->clear();
             laserCloudSurfLast->clear();
-            for (const auto& point : m_pres_initial_segmented_scan->points) 
+
+            // 遍历分割后的点云
+            for (const auto &point : m_pres_initial_segmented_scan->points)
             {
-                if(point.r >= point.g || point.b >= point.g) // Filtering non-dynamic points
+                // 根据RGB值过滤非动态点(r>=g或b>=g表示静态点)
+                if (point.r >= point.g || point.b >= point.g)
                 {
-                    if (point.intensity == 1) 
+                    // intensity=1表示角点,否则为平面点
+                    if (point.intensity == 1)
                         laserCloudCornerLast->points.push_back(point);
                     else
                         laserCloudSurfLast->points.push_back(point);
@@ -1398,11 +1440,12 @@ public:
         }
         else
         {
+            // 如果不使用先验MOS,直接根据intensity区分角点和平面点
             laserCloudCornerLast->clear();
             laserCloudSurfLast->clear();
-            for (const auto& point : m_pres_scanframe->points) 
+            for (const auto &point : m_pres_scanframe->points)
             {
-                if (point.intensity == 1) 
+                if (point.intensity == 1)
                     laserCloudCornerLast->points.push_back(point);
                 else
                     laserCloudSurfLast->points.push_back(point);
@@ -1412,26 +1455,40 @@ public:
         return;
     }
 
+    // 这个函数用于进行运动物体分割
     void MovingObjectSegmentation(const bool is_keyframe)
     {
+        // 设置为非先验处理
         bool is_prior = false;
+
+        // 运行在线MOS,使用增量位姿进行分割
         m_awv_mos.RunOnlineMOS(m_pres_scanframe, m_tf_scan_increase_to_map, m_i_frame_count - 1, timeLaserInfoCur, is_keyframe, is_prior);
+
+        // 获取分割后的点云
         m_awv_mos.GetSegmentedScan(m_pres_segmented_scan);
 
-        if(is_keyframe == true)
+        // 如果是关键帧,需要保存特征点
+        if (is_keyframe == true)
         {
+            // 创建角点和平面点云指针
             pcl::PointCloud<PointTypeMOS>::Ptr last_keyframe_corner_points(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
             pcl::PointCloud<PointTypeMOS>::Ptr last_keyframe_surface_points(boost::make_shared<pcl::PointCloud<PointTypeMOS>>());
-            for (const auto& point : m_pres_segmented_scan->points) 
+
+            // 遍历分割后的点云
+            for (const auto &point : m_pres_segmented_scan->points)
             {
-                if(point.r >= point.g || point.b >= point.g) // Filtering non-dynamic points
+                // 根据RGB值过滤非动态点(r>=g或b>=g表示静态点)
+                if (point.r >= point.g || point.b >= point.g)
                 {
+                    // intensity=1表示角点,否则为平面点
                     if (point.intensity == 1)
                         last_keyframe_corner_points->points.push_back(point);
                     else
                         last_keyframe_surface_points->points.push_back(point);
                 }
             }
+
+            // 保存关键帧的角点和平面点云
             cornerCloudKeyFrames.push_back(last_keyframe_corner_points);
             surfCloudKeyFrames.push_back(last_keyframe_surface_points);
         }
@@ -1469,10 +1526,9 @@ public:
         static double sum_publish_time_ms = 0;
         double publish_time_ms = 0;
 
-
         total_start_time = clock.now();
 
-        if(m_vec_cloud_info_queue.size() == 0)
+        if (m_vec_cloud_info_queue.size() == 0)
             return;
 
         m_mutexInputPointCloud.lock();
@@ -1486,9 +1542,9 @@ public:
 
         std::lock_guard<std::mutex> lock(mtx);
 
-
         updateInitialGuess();
-        for (int i = 0; i < 6; ++i){
+        for (int i = 0; i < 6; ++i)
+        {
             InitialPose[i] = transformTobeMapped[i];
         }
 
@@ -1506,7 +1562,7 @@ public:
 
         start_time = clock.now();
         downsampleCurrentScan();
-        duration = std::chrono::high_resolution_clock::now() - start_time;       
+        duration = std::chrono::high_resolution_clock::now() - start_time;
         down_time_ms = duration.count();
         sum_down_time_ms += down_time_ms;
 
@@ -1535,7 +1591,7 @@ public:
         sum_segmentation_time_ms += segmentation_time_ms;
 
         start_time = clock.now();
-        if(m_cfg_b_publish_pc == true)
+        if (m_cfg_b_publish_pc == true)
         {
             publishFrames();
         }
@@ -1543,29 +1599,27 @@ public:
         publish_time_ms = duration.count();
         sum_publish_time_ms += publish_time_ms;
 
-
         duration = std::chrono::high_resolution_clock::now() - total_start_time;
         total_time_ms = duration.count();
         sum_total_time_ms += total_time_ms;
 
         int frame_id = m_i_frame_count - 1;
         std::cout << std::fixed << std::setprecision(3);
-        std::cout << frame_id << " [MOS Module Ave Time] Total: " << (sum_prior_mos_time_ms + sum_segmentation_time_ms) / m_i_frame_count << ", pri: " <<  sum_prior_mos_time_ms / m_i_frame_count << ", post: " << sum_segmentation_time_ms / m_i_frame_count << "\n"; 
-        std::cout << frame_id << " [SM Module Ave Time] Total: " << (sum_total_time_ms - sum_prior_mos_time_ms - sum_segmentation_time_ms) / m_i_frame_count << "\n"; 
+        std::cout << frame_id << " [MOS Module Ave Time] Total: " << (sum_prior_mos_time_ms + sum_segmentation_time_ms) / m_i_frame_count << ", pri: " << sum_prior_mos_time_ms / m_i_frame_count << ", post: " << sum_segmentation_time_ms / m_i_frame_count << "\n";
+        std::cout << frame_id << " [SM Module Ave Time] Total: " << (sum_total_time_ms - sum_prior_mos_time_ms - sum_segmentation_time_ms) / m_i_frame_count << "\n";
 
         return;
     }
 };
 
-
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
     ros::init(argc, argv, "lio_sam");
 
     mapOptimization MO;
 
     ROS_INFO("\033[1;32m----> Map Optimization Started.\033[0m");
-    
+
     while (ros::ok())
     {
         // 콜백 처리
